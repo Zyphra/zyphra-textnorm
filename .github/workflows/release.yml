@@ -1,0 +1,59 @@
+name: release
+
+# The PyPI distributions: one abi3 wheel per platform (CPython >= 3.9) and the sdist. Each wheel is installed and run
+# on its own platform. Uploading them is manual (README, "Release").
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64 }
+          - { runner: ubuntu-24.04-arm, target: aarch64 }
+          - { runner: macos-15-intel, target: x86_64 }
+          - { runner: macos-latest, target: aarch64 }
+          - { runner: windows-latest, target: x64, python-arch: x64 }
+          - { runner: windows-11-arm, target: aarch64, python-arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.python-arch }}
+      # Linux wheels build in the manylinux2014 container (glibc 2.17).
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2014"
+          args: --release --locked --out dist
+      - name: Install and run the wheel
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist zyphra-textnorm
+          python -c "import zyphra_textnorm as t; assert t.normalize('It costs \$5.', 'en') == 'It costs five dollars.'; assert t.Normalizer(['laugh']).normalize('a <laugh/> \$5', 'en') == 'a <laugh/> five dollars'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ runner.os }}-${{ matrix.target }}
+          path: dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz

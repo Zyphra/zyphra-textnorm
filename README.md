@@ -61,8 +61,8 @@ CJK characters, and en reads `24/7` and `$20k` as speech.
 
 | | |
 | --- | --- |
-| Rust | `zyphra-textnorm = { git = "https://github.com/Zyphra/zyphra-textnorm" }` (MSRV 1.88) |
-| Python (≥ 3.9, abi3) | `pip install git+https://github.com/Zyphra/zyphra-textnorm` (builds with maturin; needs cargo) |
+| Rust | `cargo add zyphra-textnorm` (MSRV 1.88) |
+| Python (≥ 3.9) | `pip install zyphra-textnorm`: abi3 wheels for Linux (manylinux, x86_64 and aarch64), macOS (x86_64, arm64) and Windows (x64, arm64); elsewhere pip builds the sdist, which needs cargo |
 | C / C++ | `cargo rustc --release --lib --features capi --crate-type staticlib` → `target/release/libzyphra_textnorm.a` (`zyphra_textnorm.lib` on MSVC), header `include/zyphra_textnorm.h`. Link the platform's Rust std libraries (`-lpthread -ldl -lm` on Linux, `ws2_32 userenv ntdll bcrypt` on MSVC). |
 
 The release profile keeps `panic = "unwind"`: a panic inside a grammar is a grammar failure (the sentence kept as
@@ -93,6 +93,17 @@ uv venv && uv pip install -e . && .venv/bin/python -c 'import zyphra_textnorm'
 
 The bench warms every case before timing it and reports the median of 101 calls on a cleared memo. Run it at load
 below 4: medians swing by 1.5× on a busy machine. The target is ≤ 20 µs per 100 characters on every language's line.
+
+## Release
+
+The crate and the Python package share the version (`[workspace.package]` in `Cargo.toml`). Pushing a `v<version>`
+tag runs `.github/workflows/release.yml`, which builds the wheels and the sdist and installs and runs each wheel on
+its platform. Then:
+
+```sh
+cargo publish -p zyphra-textnorm                                  # crates.io
+gh run download <run id> -D dist && uv publish dist/*/*           # PyPI
+```
 
 ## Parity
 
