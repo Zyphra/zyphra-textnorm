@@ -1,0 +1,8 @@
+# Verbatim upstream copies keep their bytes (NeMo's tables have significant trailing spaces, CRs and no final newline).
+/data/** -text
+/oracle/nemo_text_processing/** -text
+/oracle/upstream_cases/** -text
+/tests/golden/*.zst binary
+/tests/corpus/*.jsonl linguist-generated
+/tests/golden/*.zst linguist-generated
+/oracle/nemo_text_processing/** linguist-vendored

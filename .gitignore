@@ -1,0 +1,9 @@
+/target/
+# the uncompressed goldens (committed as .jsonl.zst)
+/tests/golden/*.jsonl
+.venv/
+__pycache__/
+*.so
+*.pyd
+dist/
+.DS_Store

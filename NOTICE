@@ -1,0 +1,32 @@
+zyphra-textnorm
+Copyright (c) 2026 Zyphra, Inc.
+
+The original code of this project is under the MIT License (LICENSE). It includes the third-party components below;
+the full text of each license is in licenses/.
+
+================================================================================
+1. NVIDIA NeMo-text-processing
+   https://github.com/NVIDIA/NeMo-text-processing
+   Copyright (c) 2020-2024 NVIDIA CORPORATION & AFFILIATES
+   Portions Copyright 2015 and onwards Google, Inc.
+   SPDX-License-Identifier: Apache-2.0
+   Full license: licenses/nemo-Apache-2.0.txt
+
+   The Rust grammars in src/lang/ are a port of the r1.2.0 text_normalization
+   grammars, and the tables in data/ (except data/perluniprops/ and
+   data/unicode/) are copies of their data files. The r1.2.0 package itself is
+   vendored under oracle/nemo_text_processing/ (the differential-test oracle;
+   not part of the library or its packages), with its copyright and Apache-2.0
+   headers retained in each file. oracle/upstream_cases/ holds the r1.2.0 test
+   cases.
+
+================================================================================
+2. sacremoses
+   https://github.com/hplt-project/sacremoses
+   Copyright (c) 2020 alvations
+   SPDX-License-Identifier: MIT
+   Full license: licenses/sacremoses-MIT.txt
+
+   MosesDetokenizer and the perluniprops IsAlpha/IsSc tables are ported in
+   src/moses.rs and data/perluniprops/.
+================================================================================

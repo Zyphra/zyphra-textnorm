@@ -1,0 +1,17 @@
+[package]
+name = "zyphra-textnorm-py"
+version.workspace = true
+description = "Python extension module of zyphra-textnorm"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "zyphra_textnorm"
+crate-type = ["cdylib"]
+
+[dependencies]
+zyphra-textnorm = { path = ".." }
+pyo3 = { version = "0.30", features = ["abi3-py39"] }

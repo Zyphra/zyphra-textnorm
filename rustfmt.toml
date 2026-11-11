@@ -1,0 +1,4 @@
+# 120 columns, as the repo's Python (pyproject.toml); short constructs stay on one line.
+edition = "2024"
+max_width = 120
+use_small_heuristics = "Max"

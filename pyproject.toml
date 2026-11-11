@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "zyphra-textnorm"
+dynamic = ["version"]
+description = "Text normalization for TTS (written form to spoken form) in nine languages: Rust ports of the NeMo r1.2.0 grammars"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "licenses/*"]
+keywords = ["tts", "text-normalization", "speech", "nemo"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+[project.urls]
+Repository = "https://github.com/Zyphra/zyphra-textnorm"
+
+[tool.maturin]
+module-name = "zyphra_textnorm"
+manifest-path = "python/Cargo.toml"
+features = ["pyo3/extension-module"]
+
+# uv rebuilds the extension when the Rust sources or tables change, not only when this file does.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/**/*.rs" },
+    { file = "data/**/*" },
+    { file = "python/Cargo.toml" },
+    { file = "python/src/**/*.rs" },
+    { file = "zyphra_textnorm.pyi" },
+]
+
+# The oracle scripts (oracle/*.py).
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["oracle/nemo_text_processing"]
+lint.select = ["W", "F", "I", "C4"]

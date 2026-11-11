@@ -1,0 +1,33 @@
+# Verbatim upstream copies keep their bytes (NeMo's tables have significant trailing spaces and no final newline).
+exclude: ^(data/|oracle/nemo_text_processing/|oracle/upstream_cases/)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-ast
+      - id: check-added-large-files
+        exclude: ^tests/(golden|corpus)/
+      - id: check-added-large-files
+        name: check for added large files (test data)
+        files: ^tests/(golden|corpus)/
+        args: [--maxkb=6000]
+      - id: check-merge-conflict
+      - id: debug-statements
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]

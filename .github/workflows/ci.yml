@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      # Unit tests, the C ABI, and the differential tests against the committed goldens.
+      - name: Test
+        run: cargo test --release --features capi --locked
+      - name: Each language alone
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for l in en de es fr it pt ja zh ko; do
+            cargo check --locked --all-targets --no-default-features --features "lang-$l"
+          done
+      - name: Package
+        if: runner.os == 'Linux'
+        run: cargo package --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release --features capi --locked --lib --test wrapper
+
+  c-abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo rustc --release --lib --features capi --crate-type staticlib --locked
+      - name: Link and run a C caller
+        run: |
+          cat > /tmp/smoke.c <<'EOF'
+          #include "zyphra_textnorm.h"
+          #include <stdio.h>
+          #include <string.h>
+          int main(void) {
+              zyphra_textnorm *tn = zyphra_textnorm_new("laugh", 5);
+              const char *t = "So I said <laugh/> no way, $5.";
+              char *o = zyphra_textnorm_normalize(tn, t, strlen(t), "en", 2);
+              int ok = strcmp(o, "So I said <laugh/> no way, five dollars.") == 0;
+              puts(o);
+              zyphra_textnorm_free(o);
+              zyphra_textnorm_delete(tn);
+              return ok ? 0 : 1;
+          }
+          EOF
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude /tmp/smoke.c target/release/libzyphra_textnorm.a -lpthread -ldl -lm -o /tmp/smoke
+          /tmp/smoke
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and import the extension
+        shell: bash
+        run: |
+          python -m pip install .
+          python -c "import zyphra_textnorm as t; assert t.normalize('It costs \$5.', 'en') == 'It costs five dollars.'; assert t.Normalizer(['laugh']).normalize('a <laugh/> \$5', 'en') == 'a <laugh/> five dollars'"
