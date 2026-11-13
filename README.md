@@ -1,13 +1,14 @@
 # zyphra-textnorm
 
 Text normalization for text-to-speech: written text to its spoken form ("$5.32" → "five dollars thirty two cents"),
-for English, German, Spanish, French, Italian, Portuguese, Japanese, Mandarin Chinese and Korean. These are
-hand-written Rust ports of the [NeMo-text-processing](https://github.com/NVIDIA/NeMo-text-processing) r1.2.0
-grammars. There is no FST runtime and no pynini: every grammar is Rust code, every table is embedded at compile
-time, and nothing is loaded at runtime. One library serves Rust, Python and C, with a 1024-entry memo per normalizer.
+for 43 languages. The original nine packages are hand-written Rust ports of the
+[NeMo-text-processing](https://github.com/NVIDIA/NeMo-text-processing) r1.2.0 grammars; the additional 34 port
+ZONOS3's production locale grammars and Unicode CLDR release-49 data. There is no FST runtime and no pynini: every
+grammar is Rust code, every table is embedded at compile time, and nothing is loaded at runtime. One library serves
+Rust, Python and C, with a 1024-entry memo per normalizer.
 
-Every grammar call and every end-to-end output equals the NeMo pipeline on a differential corpus of 92,953 lines
-(see [Parity](#parity)), at 13-20 µs per 100 characters.
+The differential corpora contain 179,669 rows: 92,953 for the original nine languages and 86,716 for the added
+locales, generated from vendored fixtures, lexical tables, and held-out rule boundaries (see [Parity](#parity)).
 
 ## Use
 
@@ -38,7 +39,8 @@ zyphra_textnorm_free(out);
 zyphra_textnorm_delete(tn);
 ```
 
-- **Languages**: `LANGUAGES` = `en de es fr it pt ja zh ko` (NeMo's names; `zh` is Mandarin). `supported(lang)` says
+- **Languages**: `LANGUAGES` = `en de es fr it pt ja zh ko nl pl tr uk cs da fi el nb ro sk bg he th tl ms ka ta gu kn ml pa or ru sv hu ar vi id hi bn te mr ur`.
+  `zh` is Mandarin, `nb` is Norwegian Bokmål, `tl` is Tagalog/Filipino, and `or` is Odia. `supported(lang)` says
   whether this build has a grammar. One cargo feature per language (`lang-en` …), all on by default.
 - **Never fails**: a language without a grammar comes back with its line breaks collapsed, and a sentence the
   grammar fails on is kept as typed (the rest of the text is still normalized).
@@ -51,11 +53,13 @@ zyphra_textnorm_delete(tn);
 - **Memo**: each `Normalizer` remembers its last 1024 results, shared by every thread that calls it;
   `normalize(text, lang)` uses one shared normalizer without markup tags.
 
-The output is the spoken form the NeMo grammars produce, quirks included: they are ported as they are, and parity is
-the contract. On top of the grammars come the fixes of the wrapper the goldens were dumped with
-(`oracle/reference_textnorm.py`, the wrapper of [ZONOS3](https://github.com/Zyphra/ZONOS3)): sentence punctuation
-after a digit is spaced off where it breaks a grammar (pt, de, es, fr, it, ko, en), ja drops the ASCII space between
-CJK characters, and en reads `24/7` and `$20k` as speech.
+The output is the spoken form of the reference grammars, quirks included: parity is the contract. The original
+packages retain the frozen NeMo wrapper behavior (`oracle/reference_textnorm.py`); new locale packages use the
+locale-gated ZONOS3 wrapper (`oracle/new_locale_wrapper.py`). This covers sentence punctuation, native symbol and
+operator words, ordinal periods, numeric conventions, bracket spacing, and markup/verbatim preservation. Numeric
+dates follow locale conventions (`tl` uses month/day/year); ISO `YYYY-MM-DD` avoids ambiguity.
+Dutch million and billion remainders use the corrected fixed-width source grammar, preventing omitted zero groups
+from changing the number's scale.
 
 ## Install
 
@@ -77,7 +81,7 @@ typed). A build with `panic = "abort"` aborts on one instead.
 | `data/` | The upstream `.tsv` tables verbatim, the sacremoses perluniprops tables, frozen Unicode 15.0 tables |
 | `include/` | The C header |
 | `python/` | The Python extension `zyphra_textnorm` (PyO3; `pyproject.toml` at the root) |
-| `oracle/` | The differential-test oracle: the vendored NeMo r1.2.0 package, the frozen reference wrapper, the Docker image, corpus and golden dump scripts |
+| `oracle/` | The differential-test oracle: vendored NeMo r1.2.0 and ZONOS3 locale packages, reference wrappers, corpus and golden dump scripts |
 | `tests/` | Differential tests; the corpus (`corpus/`), the oracle's outputs (`golden/*.jsonl.zst`) and the oracle-confirmed equal-cost ties the port resolves differently (`ties/`) |
 | `PORTING.md` | How a NeMo grammar becomes Rust, with the verified pynini semantics |
 
@@ -107,16 +111,17 @@ gh run download <run id> -D dist && uv publish dist/*/*           # PyPI
 
 ## Parity
 
-The goldens in `tests/golden/` are the outputs of the NeMo r1.2.0 pipeline (pynini) behind the reference wrapper
+The goldens in `tests/golden/` are outputs of the vendored reference grammars (pynini) behind the locale-gated wrapper
 (`oracle/reference_textnorm.py`), committed `zstd -19`-compressed (the tests read the `.zst` directly; the plain
 `.jsonl` the dump scripts write are gitignored). The corpus is generated from every table of each language
-(`oracle/gen_corpus.py`) plus the upstream r1.2.0 test cases and handcrafted lines. The `calls` test checks every
-NeMo grammar call the wrapper made, the `golden` test every end-to-end row. The only exceptions are 735 calls where
-the oracle picks among paths of equal float32 cost by its compiled arc order (`tests/ties/`, PORTING.md "Ties");
-a listed call that no longer differs fails as stale. The English number-name FARs, which have no source, are checked
-against a 457k-row dump of the FSTs (`tests/en_cardinal.rs`).
+(`oracle/gen_corpus.py` for the original nine, `oracle/gen_new_corpus.py` for the added locales), upstream test cases,
+and handcrafted lines. `oracle/dump_new_goldens.py` compiles one new locale at a time and writes compressed goldens.
+The `calls` test checks every grammar call the wrapper made; the `golden` test checks every end-to-end row. The
+original corpus has 735 calls where the oracle picks among paths of equal float32 cost by its compiled arc order
+(`tests/ties/`, PORTING.md "Ties"); a listed call that no longer differs fails as stale. The English number-name FARs,
+which have no source, are checked against a 457k-row dump of the FSTs (`tests/en_cardinal.rs`).
 
-pynini has no macOS wheel, so the oracle runs in a linux/amd64 container (Rosetta on Apple silicon):
+Use a native Python environment with pynini, or the linux/amd64 oracle container (Rosetta on Apple silicon):
 
 ```sh
 colima start --vz-rosetta --cpu 4 --memory 8
@@ -134,5 +139,5 @@ regenerates `tests/corpus/`; `oracle/gen_unicode_tables.py` the Unicode tables (
 
 ## License
 
-MIT (`LICENSE`) for the original code; the grammars and tables ported from NeMo-text-processing are Apache-2.0, and
-the Moses detokenizer port is MIT (sacremoses). See `NOTICE` and `licenses/`.
+MIT (`LICENSE`) for original code; NeMo-derived grammars and tables are Apache-2.0, CLDR-derived locale data is
+Unicode-3.0, and the Moses detokenizer port is MIT (sacremoses). See `NOTICE` and `licenses/`.

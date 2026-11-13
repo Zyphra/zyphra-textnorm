@@ -1,0 +1,192 @@
+0
+1
+7
+11
+12
+15
+20
+21
+45
+100
+105
+111
+125
+250
+1000
+1,000
+2,500
+10,000
+111,111
+1,000,000
+3,250,000
+2,000,000,000
+5,000,000,000,000
+-12
+2024
+May 3 aso.
+ika-1
+ika-2
+ika-3
+ika-4
+ika-5
+ika-10
+ika-11
+ika-21
+ika-100
+1st
+2nd
+3rd
+4th
+Siya ang ika-2 sa paligsahan.
+3.5
+0.25
+-1.5
+12.75
+1,250.5
+1.5 milyon
+2.3 bilyon
+5 M
+7 trilyon
+Tumaas ng 2.5 porsiyento.
+1/2
+1/4
+3/4
+1/3
+2/3
+2 1/2
+5/8
+3 3/4
+½
+¼
+¾
+⅓
+⅔
+⅕
+⅖
+⅗
+⅘
+⅙
+⅚
+⅛
+⅜
+⅝
+⅞
+⅐
+⅑
+⅒
+-1/2
+-2 1/2
+100 m
+500 g
+1.5 l
+250 ml
+30°C
+37°C
+-15°C
+50%
+10-15%
+120 GB
+5 ft
+12 in
+10 mi
+3 lb
+8 oz
+2.4 GHz
+100 W
+2 ha
+45°
+5000 mAh
+60 dB
+1 Gbps
+₱15,000
+₱1.50
+₱500
+₱2,500,000
+₱10,000.00
+₱0.99
+₱10.25
+₱50k
+₱2.5M
+-₱12.50
+₱15/h
+₱10-₱20
+$100
+$2.50
+US$50
+€20
+€99.95
+10.00 €
+0.99 €
+£5
+£50
+¥10,000
+25¢
+100 USD
+250.50 EUR
+$50k
+€50k
+$2.5M
+-$12.50
+$15/h
+€20/kg
+10-20 €
+$10-$20
+Ang halaga ay ₱25,000 lamang.
+01/01/2024
+25-12-2023
+2024-03-15
+1 Mayo 2023
+10 Nob 2020
+3 Okt
+Des 2019
+2020s
+500 BC
+AD 2024
+10:30
+07:15
+14:00
+08:00 PHT
+19:30 UTC
+09:05 GMT
+10:30:15
+9:00-17:00
+8:00 am
+3:30 pm
+Magsisimula ang pulong sa 13:30.
+info@domain.com
+https://www.gov.ph
+www.up.edu.ph
+app.dev
+model.ai
+tool.io
+website.com/balita
+atbp.
+etc.
+hal.
+Blg. 5
+No. 5
+Dr. Jose
+G. Santos
+Gng. Reyes
+Bb. Cruz
+Pang. Marcos
+A & B
+© 2024
+§ 12
+~50
+±5
+±10%
+Kabanata IV
+Siglo XXI
+XL
+MIX
+CD
+3:1
+Skor ay 2:0.
+v2.0
+COVID-19
+5G
+4K
+CO2
+x^2
+y^3

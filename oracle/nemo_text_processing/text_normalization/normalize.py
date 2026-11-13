@@ -191,6 +191,13 @@ class Normalizer:
         elif lang == 'ko':
             from nemo_text_processing.text_normalization.ko.taggers.tokenize_and_classify import ClassifyFst
             from nemo_text_processing.text_normalization.ko.verbalizers.verbalize_final import VerbalizeFinalFst
+        elif lang in {"nl", "pl", "tr", "uk", "cs", "da", "fi", "el", "nb", "ro", "sk", "bg", "he",
+                      "th", "tl", "ms", "ka", "ta", "gu", "kn", "ml", "pa", "or", "id", "bn", "te", "mr", "ur"}:
+            from importlib import import_module
+
+            package = f"nemo_text_processing.text_normalization.{lang}"
+            ClassifyFst = import_module(f"{package}.taggers.tokenize_and_classify").ClassifyFst
+            VerbalizeFinalFst = import_module(f"{package}.verbalizers.verbalize_final").VerbalizeFinalFst
         else:
             raise NotImplementedError(f"Language {lang} has not been supported yet.")
 

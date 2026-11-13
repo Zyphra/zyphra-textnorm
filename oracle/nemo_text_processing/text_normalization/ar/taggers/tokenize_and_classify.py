@@ -1,0 +1,184 @@
+# Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+
+import pynini
+from pynini.lib import pynutil
+
+from nemo_text_processing.text_normalization.ar.graph_utils import (
+    NEMO_CHAR,
+    NEMO_DIGIT,
+    NEMO_SIGMA,
+    GraphFst,
+    convert_space,
+    delete_extra_space,
+    delete_space,
+    generator_main,
+)
+from nemo_text_processing.text_normalization.ar.taggers.cardinal import CardinalFst
+from nemo_text_processing.text_normalization.ar.taggers.date import DateFst
+from nemo_text_processing.text_normalization.ar.taggers.decimal import DecimalFst
+from nemo_text_processing.text_normalization.ar.taggers.electronic import ElectronicFst
+from nemo_text_processing.text_normalization.ar.taggers.fraction import FractionFst
+from nemo_text_processing.text_normalization.ar.taggers.measure import MeasureFst
+from nemo_text_processing.text_normalization.ar.taggers.money import MoneyFst
+from nemo_text_processing.text_normalization.ar.taggers.ordinal import OrdinalFst
+from nemo_text_processing.text_normalization.ar.taggers.range import RangeFst
+from nemo_text_processing.text_normalization.ar.taggers.roman import RomanFst
+from nemo_text_processing.text_normalization.ar.taggers.serial import SerialFst
+from nemo_text_processing.text_normalization.ar.taggers.telephone import TelephoneFst
+from nemo_text_processing.text_normalization.ar.taggers.time import TimeFst
+from nemo_text_processing.text_normalization.ar.taggers.whitelist import WhiteListFst
+from nemo_text_processing.text_normalization.ar.taggers.word import WordFst
+from nemo_text_processing.text_normalization.en.taggers.punctuation import PunctuationFst
+from nemo_text_processing.utils.logging import logger
+
+
+class ClassifyFst(GraphFst):
+    """
+    Final class that composes all other classification grammars. This class can process an entire sentence including punctuation.
+    For deployment, this grammar will be compiled and exported to OpenFst Finite State Archive (FAR) File.
+    """
+
+    def __init__(
+        self,
+        input_case: str,
+        deterministic: bool = False,
+        cache_dir: str = None,
+        overwrite_cache: bool = False,
+        whitelist: str = None,
+    ):
+        super().__init__(name="tokenize_and_classify", kind="classify")
+        far_file = None
+        if cache_dir is not None and cache_dir != "None":
+            os.makedirs(cache_dir, exist_ok=True)
+            whitelist_file = os.path.basename(whitelist) if whitelist else ""
+            far_file = os.path.join(
+                cache_dir, f"_{input_case}_ar_tn_{deterministic}_deterministic{whitelist_file}.far"
+            )
+        if not overwrite_cache and far_file and os.path.exists(far_file):
+            self.fst = pynini.Far(far_file, mode="r")["tokenize_and_classify"]
+            no_digits = pynini.closure(pynini.difference(NEMO_CHAR, NEMO_DIGIT))
+            self.fst_no_digits = pynini.compose(self.fst, no_digits).optimize()
+            logger.info(f"ClassifyFst.fst was restored from {far_file}.")
+        else:
+            logger.info("Creating ClassifyFst grammars. This might take some time...")
+
+            self.cardinal = CardinalFst()
+            cardinal_graph = self.cardinal.fst
+            self.decimal = DecimalFst(cardinal=self.cardinal, deterministic=deterministic)
+            decimal_graph = self.decimal.fst
+            self.fraction = FractionFst(cardinal=self.cardinal)
+            fraction_graph = self.fraction.fst
+            self.money = MoneyFst(cardinal=self.cardinal)
+            money_graph = self.money.fst
+            self.measure = MeasureFst(
+                cardinal=self.cardinal, decimal=self.decimal, fraction=self.fraction, deterministic=deterministic
+            )
+            measure_graph = self.measure.fst
+            ordinal_graph = OrdinalFst().fst
+            date_graph = DateFst(cardinal=self.cardinal).fst
+            self.time = TimeFst()
+            time_graph = self.time.fst
+            telephone_graph = TelephoneFst().fst
+            range_graph = RangeFst(cardinal=self.cardinal, time_tagger=self.time).fst
+            roman_graph = RomanFst(cardinal=self.cardinal).fst
+            electronic_graph = ElectronicFst().fst
+            serial_graph = SerialFst(cardinal=self.cardinal).fst
+            whitelist_graph = WhiteListFst(input_file=whitelist).fst
+            word_graph = WordFst(deterministic=deterministic).fst
+            punct_graph = PunctuationFst(deterministic=deterministic).fst
+
+            prefix_words = convert_space(
+                pynini.cross("~", "حوالي")
+                | pynini.cross("≈", "حوالي")
+                | pynini.cross("±", "زائد أو ناقص")
+                | pynini.cross("©", "حقوق النشر")
+                | pynini.cross("§§", "الفقرات")
+                | pynini.cross("§", "الفقرة")
+            ).optimize()
+            prefix_mod = (
+                pynutil.insert('tokens { name: "')
+                + pynutil.add_weight(prefix_words, -1.0)
+                + pynutil.insert('" } ')
+                + pynini.closure(pynutil.delete(" "), 0, 1)
+            ).optimize()
+
+            semiotic_classify = (
+                pynutil.add_weight(cardinal_graph, 1.1)
+                | pynutil.add_weight(decimal_graph, 1.1)
+                | pynutil.add_weight(fraction_graph, 1.0)
+                | pynutil.add_weight(money_graph, 1.0)
+                | pynutil.add_weight(measure_graph, 1.0)
+                | pynutil.add_weight(ordinal_graph, 1.1)
+                | pynutil.add_weight(date_graph, 1.1)
+                | pynutil.add_weight(time_graph, 1.1)
+                | pynutil.add_weight(telephone_graph, 1.1)
+                | pynutil.add_weight(range_graph, 1.05)
+                | pynutil.add_weight(roman_graph, 1.05)
+                | pynutil.add_weight(electronic_graph, 1.11)
+                | pynutil.add_weight(whitelist_graph, 1.01)
+                | pynutil.add_weight(serial_graph, 2.0)
+            )
+
+            semiotic_token = (
+                pynini.closure(prefix_mod, 0, 1) + pynutil.insert("tokens { ") + semiotic_classify + pynutil.insert(" }")
+            )
+            word_token = pynutil.insert("tokens { ") + pynutil.add_weight(word_graph, 100) + pynutil.insert(" }")
+            token = semiotic_token | word_token
+
+            punct = pynutil.insert("tokens { ") + pynutil.add_weight(punct_graph, weight=1.1) + pynutil.insert(" }")
+            token_plus_punct = (
+                pynini.closure(punct + pynutil.insert(" ")) + token + pynini.closure(pynutil.insert(" ") + punct)
+            )
+
+            graph = token_plus_punct + pynini.closure(pynutil.add_weight(delete_extra_space, 1.1) + token_plus_punct)
+            graph = delete_space + graph + delete_space
+
+            arabic_digits = pynini.string_map(
+                [
+                    ("٠", "0"),
+                    ("١", "1"),
+                    ("٢", "2"),
+                    ("٣", "3"),
+                    ("٤", "4"),
+                    ("٥", "5"),
+                    ("٦", "6"),
+                    ("٧", "7"),
+                    ("٨", "8"),
+                    ("٩", "9"),
+                    ("۰", "0"),
+                    ("۱", "1"),
+                    ("۲", "2"),
+                    ("۳", "3"),
+                    ("۴", "4"),
+                    ("۵", "5"),
+                    ("۶", "6"),
+                    ("۷", "7"),
+                    ("۸", "8"),
+                    ("۹", "9"),
+                ]
+            )
+            map_arabic_digits = (
+                pynini.cdrewrite(arabic_digits, "", "", NEMO_SIGMA)
+                @ pynini.cdrewrite(pynini.cross("٫", "."), NEMO_DIGIT, NEMO_DIGIT, NEMO_SIGMA)
+                @ pynini.cdrewrite(pynini.cross("٬", ","), NEMO_DIGIT, NEMO_DIGIT, NEMO_SIGMA)
+            )
+            self.fst = (map_arabic_digits @ graph).optimize()
+            no_digits = pynini.closure(pynini.difference(NEMO_CHAR, NEMO_DIGIT))
+            self.fst_no_digits = pynini.compose(self.fst, no_digits).optimize()
+
+            if far_file:
+                generator_main(far_file, {"tokenize_and_classify": self.fst})

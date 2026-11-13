@@ -1,0 +1,1 @@
+{"in": "-12,50 €", "reason": "order", "cost": 1.059999942779541, "oracle_tags": "tokens { money { negative: \"минус\" integer_part: \"двенадцать\" fractional_part: \"пятьдесят\" currency: \"€\" preserve_order: true } }", "rust_tags": "tokens { money { integer_part: \"минус двенадцать целых пятьдесят сотых евро\" } }"}

@@ -5,10 +5,26 @@ use crate::lattice::{Candidate, Classifier};
 use crate::tag::{Dict, Field, Value};
 use crate::text::{Cost, is_nemo_space, is_unicode_punct};
 
+/// Conservative boundary checks for shapes that separate classified tokens with whitespace or punctuation.
+/// Alphanumeric characters cannot be punctuation; all other characters remain possible boundaries.
+/// Adjacent-token shapes (`Cjk`, `Ko`, `Thai`) must not use these checks.
+#[inline]
+pub fn possible_token_start(text: &[char], start: usize) -> bool {
+    start == 0 || !text[start - 1].is_alphanumeric()
+}
+
+#[inline]
+pub fn possible_token_end(text: &[char], end: usize) -> bool {
+    end == text.len() || !text[end].is_alphanumeric()
+}
+
 /// `PunctuationFst`: `name: "<run>"` for an emphasis tag (`<x>`, `<x/>`, `</x>`; priority union) or a run of marks.
 /// Marks: Unicode `P*` except `[`, `]`, plus the file's ASCII string `extra`, plus `[`/`]` when `brackets`, minus
 /// the keys of the language's whitelist symbol table.
 pub struct Punctuation {
+    // Common-script code points use exact source-derived membership bits.
+    // Higher code points retain the sorted-table lookup; this is not an alphabet cap.
+    low_marks: [u64; 128],
     marks: Vec<char>,
     cost: Cost,
 }
@@ -46,11 +62,26 @@ impl Punctuation {
         }
         marks.sort_unstable();
         marks.dedup();
-        Punctuation { marks, cost }
+        let mut low_marks = [0u64; 128];
+        marks.retain(|&c| {
+            let cp = c as usize;
+            if let Some(word) = low_marks.get_mut(cp / 64) {
+                *word |= 1u64 << (cp % 64);
+                false
+            } else {
+                true
+            }
+        });
+        Punctuation { low_marks, marks, cost }
     }
 
+    #[inline]
     pub fn is_mark(&self, c: char) -> bool {
-        self.marks.binary_search(&c).is_ok()
+        let cp = c as usize;
+        match self.low_marks.get(cp / 64) {
+            Some(word) => word & (1u64 << (cp % 64)) != 0,
+            None => self.marks.binary_search(&c).is_ok(),
+        }
     }
 
     /// `emphasis` accepted exactly on `text[start..end]`.
@@ -74,9 +105,20 @@ impl Punctuation {
 
     /// Every span this classifier accepts at `start`, with its tag.
     pub fn spans(&self, text: &[char], start: usize, out: &mut Vec<Candidate>) {
+        self.spans_with_singletons(text, start, &[], out);
+    }
+
+    /// Restrict the supplied marks to one-character spans, independently of the emphasis alternative.
+    pub fn spans_with_singletons(&self, text: &[char], start: usize, singletons: &[char], out: &mut Vec<Candidate>) {
         let emph = Self::emphasis_end(text, start);
         let mut end = start;
         while end < text.len() && self.is_mark(text[end]) {
+            if singletons.contains(&text[end]) {
+                if end == start {
+                    out.push(self.candidate(text, start, end + 1));
+                }
+                break;
+            }
             end += 1;
             // priority union: where emphasis accepts the span, its (identical) output replaces punct's
             out.push(self.candidate(text, start, end));
@@ -238,5 +280,24 @@ mod tests {
         p.candidates(&text, 3, &mut out);
         assert_eq!(out.iter().map(|c| c.end).collect::<Vec<_>>(), [4, 7]);
         assert_eq!(out[1].tag, "name: \"<b/>\"");
+    }
+
+    #[test]
+    fn singleton_punctuation_preserves_emphasis() {
+        let singletons = ['%', '٪', '‰', '~', '&', '§'];
+        let p = Punctuation::new("!#%&'()*+,-./:;<=>?@^_`{|}~\"", true, [], 1_100_000);
+        for mark in singletons {
+            let text: Vec<char> = format!(",{mark}.").chars().collect();
+            let mut out = Vec::new();
+            p.spans_with_singletons(&text, 0, &singletons, &mut out);
+            assert_eq!(out.iter().map(|c| c.end).collect::<Vec<_>>(), [1]);
+            out.clear();
+            p.spans_with_singletons(&text, 1, &singletons, &mut out);
+            assert_eq!(out.iter().map(|c| c.end).collect::<Vec<_>>(), [2]);
+        }
+        let text: Vec<char> = "<%/>".chars().collect();
+        let mut out = Vec::new();
+        p.spans_with_singletons(&text, 0, &singletons, &mut out);
+        assert_eq!(out.iter().map(|c| c.end).collect::<Vec<_>>(), [1, 4]);
     }
 }

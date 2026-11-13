@@ -8,7 +8,7 @@
 //! (Unicode `Nd`) wins: a number is read as one token wherever the grammar allows it (the oracle broke these ties by
 //! its compiled arc order; PORTING.md, "Ties"). Then the lower summed `rank`, then the first-found path.
 
-use crate::text::{Cost, is_nemo_space, nd_range_start};
+use crate::text::{Cost, is_nemo_space, is_py_digit};
 
 /// One accepted span of a classifier starting at the queried position.
 #[derive(Clone, Debug, Default)]
@@ -45,10 +45,20 @@ pub enum Shape {
     /// de, it: `delete_space TPP (WS? TPP)* delete_space`, `TPP = (P " ")* T (" " P)*`, `P` a single punctuation
     /// token: W-free chunks each holding at least one T.
     De,
+    /// `WS* P* T P* (WS+ P* T P*)* WS*`: whitespace-separated chunks, exactly one token per chunk.
+    Separated,
+    /// `Separated` with a cost on internal whitespace runs; leading and trailing whitespace remain free.
+    SeparatedWeighted(Cost),
+    /// `Separated` chunks may alternatively consist of exactly one punctuation item.
+    SeparatedOrPunct,
+    /// `Separated` chunks may alternatively consist of a nonempty punctuation-item run.
+    SeparatedWithPunct,
     /// fr: like `De` with en-style `PUNCT` closures (W inside TPP) and `| PUNCT`: any T/P/W sequence.
     Fr,
     /// ko: `delete_space T ((WS | "") T)* delete_space`.
     Ko,
+    /// Thai: like `Ko`, but the sentence graph deletes only ASCII spaces between adjacent tokens.
+    Thai,
     /// pt: `delete_space (T (WS T)* | P) delete_space` — no punctuation splitting next to tokens.
     Pt,
     /// zh, ja: `(tokens { classify } )+`, no whitespace handling.
@@ -82,9 +92,27 @@ impl Shape {
                 (Ws, 2 | 3) => Some(3),
                 (Ws, _) => None,
             },
+            Shape::Separated | Shape::SeparatedWeighted(_) | Shape::SeparatedWithPunct => match (kind, state) {
+                (Token, 0 | 1 | 3) => Some(2),
+                (Punct, 0 | 1 | 3) => Some(1),
+                (Punct, 2) => Some(2),
+                (Ws, 0) => Some(0),
+                (Ws, 2 | 3) => Some(3),
+                (Ws, 1) if self == Shape::SeparatedWithPunct => Some(3),
+                _ => None,
+            },
+            Shape::SeparatedOrPunct => match (kind, state) {
+                (Token, 0 | 1 | 3 | 4) => Some(2),
+                (Punct, 0 | 3) => Some(1),
+                (Punct, 1 | 4) => Some(4),
+                (Punct, 2) => Some(2),
+                (Ws, 0) => Some(0),
+                (Ws, 1 | 2 | 3) => Some(3),
+                _ => None,
+            },
             Shape::Fr => Some(0),
             // 0: start, 1: after T, 2: after an inner W
-            Shape::Ko => match (kind, state) {
+            Shape::Ko | Shape::Thai => match (kind, state) {
                 (Token, _) => Some(1),
                 (Ws, 0) => Some(0),
                 (Ws, 1 | 2) => Some(2),
@@ -110,14 +138,19 @@ impl Shape {
     fn accepts(self, state: u8) -> bool {
         match self {
             Shape::En | Shape::Fr | Shape::Cjk => true,
-            Shape::De => matches!(state, 2 | 3),
-            Shape::Ko => matches!(state, 1 | 2),
+            Shape::De | Shape::Separated | Shape::SeparatedWeighted(_) => matches!(state, 2 | 3),
+            Shape::SeparatedOrPunct | Shape::SeparatedWithPunct => matches!(state, 1 | 2 | 3),
+            Shape::Ko | Shape::Thai => matches!(state, 1 | 2),
             Shape::Pt => matches!(state, 1 | 2 | 3 | 4),
         }
     }
 
-    fn has_ws(self) -> bool {
-        !matches!(self, Shape::Cjk)
+    fn is_space(self, c: char) -> bool {
+        match self {
+            Shape::Cjk => false,
+            Shape::Thai => c == ' ',
+            _ => is_nemo_space(c),
+        }
     }
 
     /// The automaton's state count (the lattice's cells per position).
@@ -125,9 +158,9 @@ impl Shape {
         match self {
             Shape::Fr | Shape::Cjk => 1,
             Shape::En => 2,
-            Shape::Ko => 3,
-            Shape::De => 4,
-            Shape::Pt => 5,
+            Shape::Ko | Shape::Thai => 3,
+            Shape::De | Shape::Separated | Shape::SeparatedWeighted(_) | Shape::SeparatedWithPunct => 4,
+            Shape::Pt | Shape::SeparatedOrPunct => 5,
         }
     }
 }
@@ -184,6 +217,13 @@ struct Work {
 
 thread_local! {
     static WORK: std::cell::Cell<Work> = std::cell::Cell::new(Work::default());
+    static PATH_ITEMS: std::cell::Cell<Vec<Item>> = const { std::cell::Cell::new(Vec::new()) };
+}
+
+/// Reuse only vector storage; no candidate or tag survives serialization.
+pub(crate) fn recycle_path(mut items: Vec<Item>) {
+    items.clear();
+    PATH_ITEMS.set(items);
 }
 
 /// The lattice inputs of one language.
@@ -208,6 +248,13 @@ impl Tagger<'_> {
         let Work { cells, digit_count, arena, owner, scratch, atoms } = work;
         let n = text.len();
         let ns_count = self.shape.nstates();
+        // A reachable cell need not permit every kind of item. In particular, a
+        // separated chunk cannot consume a second token before its whitespace.
+        // Avoid recognizing spans that no live automaton state can consume.
+        let allowed_states: [u8; 3] = [Kind::Token, Kind::Punct, Kind::Ws].map(|kind| {
+            (0..ns_count)
+                .fold(0, |mask, state| mask | (u8::from(self.shape.step(state as u8, kind).is_some()) << state))
+        });
         cells.clear();
         cells.resize((n + 1) * ns_count, None);
         cells[0] =
@@ -216,25 +263,38 @@ impl Tagger<'_> {
         digit_count.clear();
         digit_count.push(0);
         for &c in text {
-            digit_count.push(digit_count.last().unwrap() + nd_range_start(c).is_some() as u32);
+            digit_count.push(digit_count.last().unwrap() + is_py_digit(c) as u32);
         }
         arena.clear();
         owner.clear();
         for pos in 0..n {
             let base = pos * ns_count;
-            if cells[base..base + ns_count].iter().all(Option::is_none) {
+            let active_states = cells[base..base + ns_count]
+                .iter()
+                .enumerate()
+                .fold(0u8, |mask, (state, cell)| mask | (u8::from(cell.is_some()) << state));
+            if active_states == 0 {
                 continue;
             }
             atoms.clear();
             // whitespace run (maximal)
-            if self.shape.has_ws() && is_nemo_space(text[pos]) && (pos == 0 || !is_nemo_space(text[pos - 1])) {
+            if active_states & allowed_states[Kind::Ws as usize] != 0
+                && self.shape.is_space(text[pos])
+                && (pos == 0 || !self.shape.is_space(text[pos - 1]))
+            {
                 let mut end = pos;
-                while end < n && is_nemo_space(text[end]) {
+                while end < n && self.shape.is_space(text[end]) {
                     end += 1;
                 }
-                atoms.push((Kind::Ws, end, 0, 0, NONE));
+                let space_cost = match self.shape {
+                    Shape::SeparatedWeighted(weight) if pos > 0 && end < n => weight,
+                    _ => 0,
+                };
+                atoms.push((Kind::Ws, end, space_cost, 0, NONE));
             }
-            if let Some(p) = self.punct {
+            if active_states & allowed_states[Kind::Punct as usize] != 0
+                && let Some(p) = self.punct
+            {
                 scratch.clear();
                 p.candidates(text, pos, scratch);
                 for c in scratch.drain(..) {
@@ -245,15 +305,17 @@ impl Tagger<'_> {
                     }
                 }
             }
-            for (ci, cl) in self.classifiers.iter().enumerate() {
-                scratch.clear();
-                cl.candidates(text, pos, scratch);
-                for c in scratch.drain(..) {
-                    if c.end > pos && c.end <= n {
-                        let rank = ci as i64 * 1000 + c.rank as i64;
-                        atoms.push((Kind::Token, c.end, c.cost, rank, arena.len() as u32));
-                        arena.push(c);
-                        owner.push(ci as u16);
+            if active_states & allowed_states[Kind::Token as usize] != 0 {
+                for (ci, cl) in self.classifiers.iter().enumerate() {
+                    scratch.clear();
+                    cl.candidates(text, pos, scratch);
+                    for c in scratch.drain(..) {
+                        if c.end > pos && c.end <= n {
+                            let rank = ci as i64 * 1000 + c.rank as i64;
+                            atoms.push((Kind::Token, c.end, c.cost, rank, arena.len() as u32));
+                            arena.push(c);
+                            owner.push(ci as u16);
+                        }
                     }
                 }
             }
@@ -291,14 +353,17 @@ impl Tagger<'_> {
             }
         }
         let Some((mut state, _)) = best else { return Err(NoPath) };
-        let mut len = 0;
-        let (mut p, mut s) = (n, state);
-        while let Some(cell) = cells[p * ns_count + s as usize].filter(|c| c.prev_pos != u32::MAX) {
-            len += 1;
-            (p, s) = (cell.prev_pos as usize, cell.prev_state);
+        let mut items = PATH_ITEMS.take();
+        if items.capacity() == 0 {
+            let mut len = 0;
+            let (mut p, mut s) = (n, state);
+            while let Some(cell) = cells[p * ns_count + s as usize].filter(|c| c.prev_pos != u32::MAX) {
+                len += 1;
+                (p, s) = (cell.prev_pos as usize, cell.prev_state);
+            }
+            items.reserve(len);
         }
         let mut pos = n;
-        let mut items = Vec::with_capacity(len);
         loop {
             let cell = cells[pos * ns_count + state as usize].expect("back-pointer chain");
             if cell.prev_pos == u32::MAX {
@@ -373,8 +438,80 @@ mod tests {
     }
 
     #[test]
+    fn separated_shape_requires_one_token_per_chunk() {
+        assert_eq!(
+            tags(Shape::Separated, ",ab, cd").unwrap(),
+            ["name: \",\"", "name: \"ab\"", "name: \",\"", "name: \"cd\""]
+        );
+        assert!(tags(Shape::Separated, ",").is_err());
+        assert!(tags(Shape::Separated, "ab ,").is_err());
+        assert!(tags(Shape::Separated, "ab,cd").is_err());
+    }
+
+    #[test]
+    fn punctuation_chunk_alternatives_preserve_item_counts() {
+        assert_eq!(tags(Shape::SeparatedOrPunct, "ab , cd").unwrap(), ["name: \"ab\"", "name: \",\"", "name: \"cd\""]);
+        assert!(tags(Shape::SeparatedOrPunct, ",,").is_err());
+        assert_eq!(tags(Shape::SeparatedOrPunct, ",,ab").unwrap(), ["name: \",\"", "name: \",\"", "name: \"ab\""]);
+        assert_eq!(tags(Shape::SeparatedWithPunct, ",,").unwrap(), ["name: \",\"", "name: \",\""]);
+        assert!(tags(Shape::SeparatedOrPunct, "ab,cd").is_err());
+        assert!(tags(Shape::SeparatedWithPunct, "ab,cd").is_err());
+    }
+
+    #[test]
+    fn thai_shape_only_deletes_ascii_space() {
+        assert_eq!(tags(Shape::Thai, "ab cd").unwrap(), ["name: \"ab\"", "name: \"cd\""]);
+        assert!(tags(Shape::Thai, "ab\u{a0}cd").is_err());
+        assert_eq!(tags(Shape::Ko, "ab\u{a0}cd").unwrap(), ["name: \"ab\"", "name: \"cd\""]);
+    }
+
+    #[test]
+    fn weighted_separators_change_segmentation_without_charging_edge_whitespace() {
+        struct Joined;
+        impl Classifier for Joined {
+            fn candidates(&self, text: &[char], start: usize, out: &mut Vec<Candidate>) {
+                let (end, cost) = if start == 0 {
+                    (text.len(), 300)
+                } else if text[start..].starts_with(&['x', ' ', 'y']) {
+                    (start + 3, 250)
+                } else {
+                    return;
+                };
+                out.push(Candidate { end, cost, rank: 0, tag: "name: \"joined\"".into() });
+            }
+        }
+        let classifiers: Vec<Box<dyn Classifier>> = vec![Box::new(Joined), Box::new(Word)];
+        let text: Vec<char> = " x y ".chars().collect();
+        for (shape, expected) in
+            [(Shape::Separated, vec![(1, 2), (3, 4)]), (Shape::SeparatedWeighted(100), vec![(1, 4)])]
+        {
+            let tagger = Tagger { shape, classifiers: &classifiers, punct: None };
+            let spans: Vec<_> = tagger
+                .best_path(&text)
+                .unwrap()
+                .into_iter()
+                .filter(|item| item.kind == Kind::Token)
+                .map(|item| (item.start, item.end))
+                .collect();
+            assert_eq!(spans, expected);
+        }
+    }
+
+    #[test]
     fn every_reachable_state_fits_the_shape() {
-        for shape in [Shape::En, Shape::De, Shape::Fr, Shape::Ko, Shape::Pt, Shape::Cjk] {
+        for shape in [
+            Shape::En,
+            Shape::De,
+            Shape::Separated,
+            Shape::SeparatedWeighted(1_100_000),
+            Shape::SeparatedOrPunct,
+            Shape::SeparatedWithPunct,
+            Shape::Fr,
+            Shape::Ko,
+            Shape::Thai,
+            Shape::Pt,
+            Shape::Cjk,
+        ] {
             let n = shape.nstates() as u8;
             for state in 0..n {
                 for kind in [Kind::Token, Kind::Punct, Kind::Ws] {

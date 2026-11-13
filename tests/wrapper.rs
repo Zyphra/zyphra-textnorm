@@ -80,3 +80,33 @@ fn only_the_given_tags_split_the_text() {
     assert_eq!(Normalizer::with_markup_tags(["laugh"]).normalize(text, "ja"), text);
     assert_eq!(normalize(text, "ja"), text);
 }
+
+#[cfg(feature = "lang-id")]
+#[test]
+fn repeated_currency_ranges_require_positive_endpoints() {
+    let grammar = zyphra_textnorm::lang::grammar("id").unwrap();
+    assert_eq!(
+        zyphra_textnorm::pipeline::normalize(grammar, "$10-$20", false).unwrap(),
+        "sepuluh dolar sampai dua puluh dolar"
+    );
+    for text in ["$10--$20", "$10-−$20", "$10-~$20", "$10-±$20"] {
+        assert_eq!(zyphra_textnorm::pipeline::normalize(grammar, text, false).unwrap(), text);
+    }
+}
+
+#[cfg(feature = "lang-ru")]
+#[test]
+fn russian_dates_keep_following_text() {
+    assert_eq!(
+        zyphra_textnorm::normalize("1 мая 2024 г. важный текст", "ru"),
+        "первое мая две тысячи двадцать четвертого года важный текст"
+    );
+}
+
+#[cfg(feature = "lang-vi")]
+#[test]
+fn vietnamese_approximation_materializes_selected_children() {
+    for (text, expected) in [("~1.5", "khoảng một phẩy năm"), ("~1/2", "khoảng một phần hai")] {
+        assert_eq!(zyphra_textnorm::normalize(text, "vi"), expected);
+    }
+}

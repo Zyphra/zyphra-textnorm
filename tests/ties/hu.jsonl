@@ -1,0 +1,1 @@
+{"in": "10,00 €", "reason": "order", "cost": 1.100000023841858, "oracle_tags": "tokens { money { integer_part: \"tíz\" currency_maj: \"euró\" preserve_order: true } }", "rust_tags": "tokens { money { integer_part: \"tíz\" fractional_part: \"nulla század\" currency_maj: \"euró\" preserve_order: true } }"}

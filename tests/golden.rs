@@ -44,8 +44,6 @@ struct Row {
     calls: Vec<Call>,
 }
 
-const LANGS: [&str; 9] = ["en", "de", "es", "fr", "it", "pt", "ja", "zh", "ko"];
-
 /// The markup the oracle keeps as typed (`oracle/reference_textnorm.py`).
 const ORACLE_MARKUP_TAGS: [&str; 7] = ["laugh", "breath", "sigh", "cough", "panting", "shouting", "crying"];
 
@@ -59,7 +57,7 @@ fn rows(lang: &str) -> Vec<Row> {
 
 fn selected() -> Vec<&'static str> {
     let only = std::env::var("GOLDEN_LANG").ok();
-    LANGS.into_iter().filter(|l| only.as_deref().is_none_or(|o| o == *l)).collect()
+    zyphra_textnorm::LANGUAGES.into_iter().filter(|l| only.as_deref().is_none_or(|o| o == *l)).collect()
 }
 
 fn limit() -> usize {

@@ -1,0 +1,302 @@
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+15
+18
+20
+21
+28
+80
+88
+100
+105
+250
+800
+1000
+1,000
+1.000
+2,500
+8,000
+10,000
+111,111
+1,000,000
+1.000.000
+3,250,000
+2,000,000,000
+5,000,000,000,000
+-12
+−7
+2024
+0042
+007
+Ada 3 ekor kucing.
+Tahun 1957 adalah tahun kemerdekaan.
+Saya ada 8 buah buku.
+~50
+±5
+3:1
+Skor akhir 2:0.
+5+3
+5 = 5
+2^3
+ke-1
+ke-2
+ke-3
+ke-4
+ke-5
+ke-6
+ke-7
+ke-8
+ke-9
+ke-10
+ke-11
+ke-12
+ke-18
+ke-20
+ke-21
+ke-28
+ke-100
+ke1
+ke2
+ke8
+ke100
+Dia mendapat tempat ke-2 dalam pertandingan itu.
+Sambutan hari ke-8 itu meriah.
+3.14
+3.5
+3,5
+0.25
+0,25
+-1.5
+12.75
+1,250.5
+1.250,5
+1.5 juta
+2.3 bilion
+5 jt
+7 trilion
+50%
+2.5%
+0.5%
+99.9%
+5‰
+Kadar inflasi naik 2.5 peratus.
+1/2
+½
+1/4
+¼
+3/4
+¾
+1/3
+⅓
+2/3
+⅔
+1/8
+⅛
+3/8
+⅜
+5/8
+⅝
+7/8
+⅞
+1/10
+⅒
+2 1/2
+2½
+3 3/4
+3¾
+-1/2
+-2½
+5 km
+100 m
+2.5 kg
+500 g
+1.5 l
+250 ml
+30°C
+37°C
+-15°C
+70°F
+45°
+60 km/jam
+120 km/h
+120km/h
+10 m/s
+50kg
+100m
+250ml
+1.5km
+64GB
+120 GB
+5 ft
+12 in
+10 mi
+3 lb
+8 oz
+2.4 GHz
+2.4GHz
+100 W
+2 ha
+5000 mAh
+60 dB
+10 Gbps
+100 Mbps
+50 kWh
+1013 hPa
+250 kcal
+100 Ω
+50 µg
+10 µm
+100 m²
+5 m³
+~10 km
+±10%
+Jaraknya 15 km dari sini.
+RM15
+RM15.00
+RM15.50
+RM 1.5 juta
+RM500
+RM1,500
+RM 2,500,000
+RM50k
+RM2.5M
+25¢
+$100
+$2.50
+$1,234.56
+$10.00
+$0.99
+US$50
+100 USD
+USD100
+€20
+€99.95
+99.95 €
+10.00 €
+0.99 €
+€50k
+£5
+£50
+S$30
+B$50
+CA$50
+100 CAD
+100 CHF
+A$100
+R$100
+MX$100
+Rp15,000
+Rp 2,500,000
+¥10,000
+500 INR
+₹500
+Rs. 500
+500 ₽
+100 ₺
+50000 ₫
+₦1000
+500 ฿
+500 ₱
+10000 ₩
+100 ₪
+500 ₴
+500 ৳
+1000 ֏
+-$12.50
+-12.50 €
+$15/h
+€20/kg
+10-20 €
+RM10-20 juta
+Harganya RM25.00 sahaja.
+31/08/1957
+01/01/2024
+25-12-2023
+05.06.2010
+2024-03-15
+31 Ogos 1957
+1 Mei 2023
+10 Nov 2020
+3 Okt
+Dis 2019
+2020s
+1990-an
+80-an
+500 SM
+Lahir pada 31/08/1957.
+10:30
+pukul 10.30
+07:15
+14:00
+14.00
+pukul 08:00 MYT
+14:30 UTC
+09:00 GMT
+10:30:15
+jam 7
+9:00-17:00
+Mesyuarat bermula pada pukul 14:00.
++60 12-345 6789
+012-345 6789
+(03) 1234 5678
+012-3456789
++1 202 555 0123
+Sila hubungi 012-345 6789 untuk bantuan.
+ali_ahmad@gmail.com
+https://www.google.com
+www.um.edu.my
+http://localhost:8080/api
+app.dev
+model.ai
+dll
+dll.
+dsb
+dsb.
+dsbg.
+dst.
+cth.
+iaitu
+No. 5
+no. 5
+#5
+Jln. Ampang
+En. Ahmad
+Pn. Siti
+Cik Aminah
+Dr. Mahathir
+Prof. Ungku
+A & B
+© 2024
+§ 12
+Bab IV
+Abad XXI
+Louis XIV
+Sultan Abdullah II
+XL
+MIX
+CD
+v2.0
+v2.1.3
+3.11.2
+iOS 17.4.1
+COVID-19
+A4
+BA249
+192.168.1.1
+x^2
+y^3
+Saya suka makan nasi lemak.
+Ini adalah rumah saya!
+tahun 100 M
+tahun 1445 H

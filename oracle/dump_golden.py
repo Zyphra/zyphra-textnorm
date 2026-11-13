@@ -1,4 +1,4 @@
-"""Golden outputs of the frozen reference pipeline (container only).
+"""Golden outputs of the frozen reference pipeline (native pynini or oracle container).
 
     python oracle/dump_golden.py --lang en --corpus tests/corpus/en.jsonl --out tests/golden/en.jsonl
     python oracle/dump_golden.py --all
@@ -38,6 +38,7 @@ SERVER_CODE = {
     "zh": "cmn",
     "ko": "ko",
 }
+SERVER_CODE.update({lang: lang for lang in ref.NEW_LANGS})
 LANGS = ["en", "de", "es", "fr", "it", "pt", "ja", "zh", "ko"]
 
 _state = {"fallback": False, "calls": []}

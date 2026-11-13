@@ -1,8 +1,8 @@
 //! Text normalization for TTS: written text to its spoken form ("$5.32" → "five dollars thirty two cents").
 //!
-//! Hand-written Rust ports of the NeMo-text-processing r1.2.0 grammars (taggers with their weights, verbalizers, the
-//! `Normalizer` pipeline, the Moses detokenizer and `post_process_punct`) for nine languages, plus the layer around
-//! them: line-break collapsing, markup and verbatim spans kept out of the grammars, per-language fixes, a sentence
+//! Native Rust ports of the NeMo-text-processing r1.2.0 grammars and ZONOS3's CLDR-based locale grammars,
+//! for 43 languages, plus the `Normalizer` pipeline, Moses detokenizer, punctuation processing, and wrapper:
+//! line-break collapsing, markup and verbatim spans kept out of the grammars, per-language fixes, a sentence
 //! retry after a grammar failure, and a memo. No FST runtime: every grammar is Rust code, every grammar table is
 //! embedded at compile time, nothing is loaded at runtime.
 //!
@@ -46,7 +46,11 @@ pub use wrapper::Normalizer;
 
 /// The grammar languages (ISO 639-1; `zh` is Mandarin), in NeMo's names. [`supported`] says which this build has (one
 /// cargo feature per language, all on by default).
-pub const LANGUAGES: [&str; 9] = ["en", "de", "es", "fr", "it", "pt", "ja", "zh", "ko"];
+pub const LANGUAGES: [&str; 43] = [
+    "en", "de", "es", "fr", "it", "pt", "ja", "zh", "ko", "nl", "pl", "tr", "uk", "cs", "da", "fi", "el", "nb", "ro",
+    "sk", "bg", "he", "th", "tl", "ms", "ka", "ta", "gu", "kn", "ml", "pa", "or", "ru", "sv", "hu", "ar", "vi", "id",
+    "hi", "bn", "te", "mr", "ur",
+];
 
 /// Whether this build has a grammar for `language` (one of [`LANGUAGES`]).
 pub fn supported(language: &str) -> bool {

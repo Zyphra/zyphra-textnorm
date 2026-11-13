@@ -412,8 +412,399 @@ fn pt_lead_bracket(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+// These passes apply only to the newly ported locales. The existing locales retain their
+// original wrapper behavior.
+fn symbol_words(lang: &str) -> Option<[&'static str; 7]> {
+    Some(match lang {
+        "nl" => ["min", "plus", "is gelijk aan", "maal", "gedeeld door", "tot de macht", "nummer"],
+        "pl" => ["minus", "plus", "równa się", "razy", "podzielone przez", "do potęgi", "numer"],
+        "tr" => ["eksi", "artı", "eşittir", "çarpı", "bölü", "üzeri", "numara"],
+        "uk" => ["мінус", "плюс", "дорівнює", "помножити на", "поділити на", "у степені", "номер"],
+        "cs" => ["mínus", "plus", "rovná se", "krát", "děleno", "na", "číslo"],
+        "da" => ["minus", "plus", "er lig med", "gange", "divideret med", "i", "nummer"],
+        "fi" => ["miinus", "plus", "on yhtä kuin", "kertaa", "jaettuna", "potenssiin", "numero"],
+        "el" => ["μείον", "συν", "ίσον", "επί", "διά", "στη δύναμη", "αριθμός"],
+        "nb" => ["minus", "pluss", "er lik", "ganger", "delt på", "opphøyd i", "nummer"],
+        "ro" => ["minus", "plus", "egal cu", "ori", "împărțit la", "la puterea", "numărul"],
+        "sk" => ["mínus", "plus", "rovná sa", "krát", "delené", "na", "číslo"],
+        "bg" => ["минус", "плюс", "е равно на", "по", "делено на", "на степен", "номер"],
+        "he" => ["מינוס", "פלוס", "שווה", "כפול", "חלקי", "בחזקת", "מספר"],
+        "th" => ["ลบ", "บวก", "เท่ากับ", "คูณ", "หาร", "ยกกำลัง", "หมายเลข"],
+        "tl" => ["bawas", "dagdag", "ay katumbas ng", "beses", "hinati sa", "na may eksponenteng", "bilang"],
+        "ms" => ["negatif", "tambah", "sama dengan", "darab", "bahagi", "kuasa", "nombor"],
+        "ka" => ["მინუს", "პლუს", "უდრის", "გამრავლებული", "გაყოფილი", "ხარისხში", "ნომერი"],
+        "ta" => ["கழித்தல்", "கூட்டல்", "சமம்", "பெருக்கல்", "வகுத்தல்", "அடுக்கு", "எண்"],
+        "gu" => ["બાદ", "વત્તા", "બરાબર", "ગુણ્યા", "ભાગ્યા", "ની ઘાત", "નંબર"],
+        "kn" => ["ಕಳೆ", "ಕೂಡು", "ಸಮ", "ಗುಣಿಸು", "ಭಾಗಿಸು", "ಘಾತ", "ಸಂಖ್ಯೆ"],
+        "ml" => ["കുറയ്ക്കുക", "കൂട്ടുക", "സമം", "ഗുണം", "ഹരിക്കുക", "ഘാതം", "നമ്പർ"],
+        "pa" => ["ਘਟਾਓ", "ਜੋੜ", "ਬਰਾਬਰ", "ਗੁਣਾ", "ਭਾਗ", "ਦੀ ਘਾਤ", "ਨੰਬਰ"],
+        "or" => ["ବିଯୋଗ", "ଯୋଗ", "ସମାନ", "ଗୁଣନ", "ଭାଗ", "ଘାତ", "ସଂଖ୍ୟା"],
+        "ru" => ["минус", "плюс", "равно", "умножить на", "разделить на", "в степени", "номер"],
+        "sv" => ["minus", "plus", "är lika med", "gånger", "delat med", "upphöjt till", "nummer"],
+        "hu" => ["mínusz", "plusz", "egyenlő", "szorozva", "osztva", "hatványon", "szám"],
+        "ar" => ["ناقص", "زائد", "يساوي", "ضرب", "على", "أس", "رقم"],
+        "vi" => ["trừ", "cộng", "bằng", "nhân", "chia", "mũ", "số"],
+        "id" => ["kurang", "tambah", "sama dengan", "kali", "bagi", "pangkat", "nomor"],
+        "hi" => ["घटा", "धन", "बराबर", "गुणा", "भाग", "की घात", "नंबर"],
+        "bn" => ["বিয়োগ", "যোগ", "সমান", "গুণ", "ভাগ", "এর ঘাত", "নম্বর"],
+        "te" => ["తీసివేత", "కూడిక", "సమానం", "గుణకారం", "భాగహారం", "ఘాతం", "సంఖ్య"],
+        "mr" => ["वजा", "अधिक", "बरोबर", "गुणिले", "भागिले", "चा घात", "क्रमांक"],
+        "ur" => ["منفی", "جمع", "برابر", "ضرب", "تقسیم", "کی طاقت", "نمبر"],
+        _ => return None,
+    })
+}
+
+fn operator(c: char) -> Option<usize> {
+    match c {
+        '-' | '−' => Some(0),
+        '+' => Some(1),
+        '=' => Some(2),
+        '×' | '*' => Some(3),
+        '÷' => Some(4),
+        '^' => Some(5),
+        _ => None,
+    }
+}
+
+fn number_end(c: &[char], mut i: usize) -> usize {
+    while i < c.len() && is_py_digit(c[i]) {
+        i += 1;
+    }
+    while i + 1 < c.len() && matches!(c[i], '.' | ',') && is_py_digit(c[i + 1]) {
+        i += 2;
+        while i < c.len() && is_py_digit(c[i]) {
+            i += 1;
+        }
+    }
+    i
+}
+
+fn speak_symbols<'t>(text: &'t str, lang: &str, words: &[&str; 7]) -> Cow<'t, str> {
+    if !text.chars().any(|c| matches!(c, '#' | '−') || operator(c).is_some()) {
+        return Cow::Borrowed(text);
+    }
+    let mut c: Vec<char> = text.chars().collect();
+    // The minus rewrite runs before expression matching and only at a non-word boundary.
+    for i in 0..c.len() {
+        if c[i] != '−' || (i > 0 && (is_py_word(c[i - 1]) || ".,".contains(c[i - 1]))) {
+            continue;
+        }
+        let rest = &c[i + 1..];
+        let currency_code = rest.iter().take_while(|ch| ch.is_ascii_uppercase()).count();
+        let rs = rest.starts_with(&['R', 's']) && {
+            let mut j = 2;
+            if rest.get(j) == Some(&'.') {
+                j += 1;
+            }
+            while rest.get(j).is_some_and(|x| is_py_space(*x)) {
+                j += 1;
+            }
+            rest.get(j).is_some_and(|x| is_py_digit(*x))
+        };
+        if rest
+            .first()
+            .is_some_and(|x| is_py_digit(*x) || "$£€¥₹₨₦৳֏₽₩₫₱฿₺₪₴₵¢¼½¾".contains(*x) || ('⅐'..='⅞').contains(x))
+            || (1..=3).contains(&currency_code) && rest.get(currency_code) == Some(&'$')
+            || rs
+        {
+            c[i] = '-';
+        }
+    }
+    let mut out = String::new();
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == '#'
+            && c.get(i + 1).is_some_and(|x| is_py_digit(*x))
+            && (i == 0 || !(is_py_word(c[i - 1]) || c[i - 1] == '&'))
+        {
+            out.push_str(words[6]);
+            out.push(' ');
+            i += 1;
+            continue;
+        }
+        if is_py_digit(c[i]) && (i == 0 || !(is_py_word(c[i - 1]) || ".,/:-&#".contains(c[i - 1]))) {
+            let first_end = number_end(&c, i);
+            let mut end = first_end;
+            let mut parts = Vec::new();
+            loop {
+                let mut op_pos = end;
+                let spaced = c.get(op_pos) == Some(&' ') && c.get(op_pos + 2) == Some(&' ');
+                if spaced {
+                    op_pos += 1;
+                }
+                let Some(&op) = c.get(op_pos) else { break };
+                let Some(index) = operator(op) else { break };
+                if !spaced && index == 0 {
+                    break;
+                }
+                let start = op_pos + if spaced { 2 } else { 1 };
+                if !c.get(start).is_some_and(|x| is_py_digit(*x)) {
+                    break;
+                }
+                let next = number_end(&c, start);
+                parts.push((index, start, next));
+                end = next;
+            }
+            // Regex backtracking can discard trailing operator/number pairs.
+            while !parts.is_empty() && c.get(end).is_some_and(|x| is_py_word(*x) || "/:".contains(*x)) {
+                parts.pop();
+                end = parts.last().map_or(first_end, |p| p.2);
+            }
+            if !parts.is_empty() && parts.iter().any(|p| p.0 != 0) {
+                let native_power = matches!(lang, "hi" | "bn" | "te" | "mr" | "ur")
+                    && parts.len() == 1
+                    && parts[0].0 == 5
+                    && !c[i..end].contains(&' ');
+                let swedish_equation = lang == "sv"
+                    && ((parts.len() == 2 && matches!(parts[0].0, 0 | 1 | 3 | 4) && parts[1].0 == 2)
+                        || (parts.len() == 1
+                            && parts[0].0 == 2
+                            && i > 0
+                            && matches!(c[i - 1], '+' | '-' | '−' | '×' | '*' | '÷')));
+                if native_power || swedish_equation {
+                    out.extend(&c[i..end]);
+                    i = end;
+                    continue;
+                }
+                out.extend(&c[i..first_end]);
+                for (op, start, end) in parts {
+                    out.push(' ');
+                    if lang == "hu" && op == 5 && c[start..end].iter().all(|c| is_py_digit(*c)) {
+                        let vowel = c[start] == '5' || (c[start] == '1' && matches!(end - start, 1 | 4));
+                        out.push_str(if vowel { "az " } else { "a " });
+                        out.extend(&c[start..end]);
+                        out.push_str(". hatványon");
+                    } else {
+                        out.push_str(words[op]);
+                        out.push(' ');
+                        out.extend(&c[start..end]);
+                    }
+                }
+                i = end;
+                continue;
+            }
+        }
+        out.push(c[i]);
+        i += 1;
+    }
+    Cow::Owned(out)
+}
+
+fn hu_ordinal_context(before: &[char]) -> bool {
+    if !before.last().is_some_and(|c| is_py_space(*c)) {
+        return false;
+    }
+    let mut end = before.len();
+    while end > 0 && is_py_space(before[end - 1]) {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && !is_py_space(before[start - 1]) {
+        start -= 1;
+    }
+    let token = &before[start..end];
+    let case_eq = |expected: &str| {
+        let mut actual = token.iter().copied();
+        expected.chars().all(|expected| {
+            actual.next().is_some_and(|c| {
+                let mut lower = c.to_lowercase();
+                (lower.next() == Some(expected) && lower.next().is_none())
+                    || (expected == 'i' && matches!(c, 'İ' | 'ı'))
+                    || (expected == 's' && c == 'ſ')
+            })
+        }) && actual.next().is_none()
+    };
+    if case_eq("a") || case_eq("az") {
+        return true;
+    }
+    if let Some(number) = token.strip_suffix(&['.']) {
+        if (1..=4).contains(&number.len())
+            && (number.iter().all(|c| is_py_digit(*c)) || number.iter().all(|c| matches!(c, 'I' | 'V' | 'X')))
+        {
+            return true;
+        }
+    }
+    [
+        "január",
+        "február",
+        "március",
+        "április",
+        "május",
+        "június",
+        "július",
+        "augusztus",
+        "szeptember",
+        "október",
+        "november",
+        "december",
+        "jan.",
+        "feb.",
+        "febr.",
+        "márc.",
+        "ápr.",
+        "máj.",
+        "jún.",
+        "júl.",
+        "aug.",
+        "szep.",
+        "szept.",
+        "okt.",
+        "nov.",
+        "dec.",
+    ]
+    .iter()
+    .any(|month| case_eq(month))
+}
+
+fn keep_ordinal_periods(text: &str, lang: &str) -> String {
+    let c: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < c.len() {
+        if !is_py_digit(c[i]) || i > 0 && is_py_digit(c[i - 1]) || i > 1 && c[i - 1] == ' ' && is_py_digit(c[i - 2]) {
+            out.push(c[i]);
+            i += 1;
+            continue;
+        }
+        let mut end = i;
+        while end < c.len() && is_py_digit(c[end]) {
+            end += 1;
+        }
+        // The grouped alternative has priority over the ungrouped alternative.
+        if end - i <= 3 {
+            while end + 3 < c.len() && c[end] == ' ' && c[end + 1..end + 4].iter().all(|x| is_py_digit(*x)) {
+                end += 4;
+            }
+        }
+        if c.get(end) != Some(&'.') {
+            out.extend(&c[i..end]);
+            i = end;
+            continue;
+        }
+        let mut after = end + 1;
+        if after < c.len() && !is_py_space(c[after]) && !"\"'»”)]".contains(c[after]) {
+            out.extend(&c[i..=end]);
+            i = end + 1;
+            continue;
+        }
+        if after < c.len() && !is_py_space(c[after]) {
+            let mut j = after;
+            while j < c.len() && "\"'»”)]".contains(c[j]) {
+                j += 1;
+            }
+            while j < c.len() && is_py_space(c[j]) {
+                j += 1;
+            }
+            if j != c.len() {
+                out.extend(&c[i..=end]);
+                i = end + 1;
+                continue;
+            }
+        }
+        while after < c.len() && is_py_space(c[after]) {
+            after += 1;
+        }
+        let keep = if after < c.len() && !"\"'»”)]".contains(c[after]) {
+            let mut j = after;
+            while j < c.len() && j - after < 4 && "IVX".contains(c[j]) {
+                j += 1;
+            }
+            c[after].is_lowercase() || is_py_digit(c[after]) || j > after && c.get(j) == Some(&'.')
+        } else {
+            let year = end - i == 4
+                && c[i..end].iter().all(|x| is_py_digit(*x))
+                && (1000..=2999).contains(&c[i..end].iter().fold(0, |n, x| n * 10 + nd_value(*x)));
+            (c[..i].iter().all(|x| is_py_space(*x)) && !year) || (lang == "hu" && hu_ordinal_context(&c[..i]))
+        };
+        out.extend(&c[i..end]);
+        out.push(if keep { '\u{e013}' } else { '.' });
+        i = end + 1;
+    }
+    out
+}
+
+#[inline]
+fn sentence_punctuation(c: char) -> bool {
+    matches!(c, '.' | '!' | '?' | ',' | ';' | ':' | '।' | '۔' | '،' | '؛' | '؟' | '։' | '॥')
+}
+
+fn arabic_digits(text: &str) -> Cow<'_, str> {
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    for (i, c) in text.char_indices() {
+        let replacement = match c {
+            '٠'..='٩' => Some(char::from_digit(c as u32 - '٠' as u32, 10).unwrap()),
+            '۰'..='۹' => Some(char::from_digit(c as u32 - '۰' as u32, 10).unwrap()),
+            '٫' => Some('.'),
+            '٬' => None,
+            _ => continue,
+        };
+        let buf = out.get_or_insert_with(|| String::with_capacity(text.len()));
+        buf.push_str(&text[copied..i]);
+        if let Some(c) = replacement {
+            buf.push(c);
+        }
+        copied = i + c.len_utf8();
+    }
+    match out {
+        Some(mut out) => {
+            out.push_str(&text[copied..]);
+            Cow::Owned(out)
+        }
+        None => Cow::Borrowed(text),
+    }
+}
+
+fn needs_new_locale_pre(text: &str) -> bool {
+    let mut chars = text.chars();
+    let mut previous = None;
+    while let Some(c) = chars.next() {
+        if matches!(c, '#' | '−' | '+' | '=' | '×' | '*' | '÷' | '^' | '\u{e013}') {
+            return true;
+        }
+        if sentence_punctuation(c) && previous.is_some_and(is_py_digit) {
+            let next = chars.clone().find(|c| !"\"'»”’)]".contains(*c));
+            if next.is_none_or(is_py_space) {
+                return true;
+            }
+        }
+        previous = Some(c);
+    }
+    false
+}
+
+fn new_locale_pre<'t>(text: &'t str, lang: &str, words: &[&str; 7]) -> Cow<'t, str> {
+    let text = if matches!(lang, "ar" | "ur") { arabic_digits(text) } else { Cow::Borrowed(text) };
+    if !needs_new_locale_pre(&text) {
+        return text;
+    }
+    let symbols = speak_symbols(&text, lang, words);
+    let masked = if matches!(lang, "hu" | "sv" | "pl" | "tr" | "cs" | "da" | "fi" | "nb" | "sk") {
+        Cow::Owned(keep_ordinal_periods(&symbols, lang))
+    } else {
+        symbols
+    };
+    let mut chars = masked.chars();
+    let mut previous = None;
+    let mut out = String::with_capacity(masked.len() + masked.len() / 2);
+    while let Some(c) = chars.next() {
+        if previous.is_some_and(is_py_digit) && ".!?,;:।۔،؛؟։॥".contains(c) {
+            let next = chars.clone().find(|c| !"\"'»”’)]".contains(*c));
+            if next.is_none_or(is_py_space) {
+                out.push(' ');
+            }
+        }
+        out.push(if c == '\u{e013}' { '.' } else { c });
+        previous = Some(c);
+    }
+    Cow::Owned(out)
+}
+
 /// `pre_normalize(text, lang)`: the rewrite applied right before the grammar (see the module docs).
 pub fn pre_normalize<'t>(text: &'t str, nemo: &str) -> Cow<'t, str> {
+    if let Some(words) = symbol_words(nemo) {
+        return new_locale_pre(text, nemo, &words);
+    }
     match nemo {
         "ja" | "zh" => cjk_space(text),
         "de" => then(then(space_digit_punct(text, "!?,;:"), de_final_period), de_long_period),
@@ -484,8 +875,88 @@ fn remove_space_after_open(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+fn new_locale_post(result: &str) -> Cow<'_, str> {
+    let mut chars = result.char_indices().peekable();
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    while let Some((start, c)) = chars.next() {
+        if !matches!(c, ' ' | '\u{a0}') {
+            continue;
+        }
+        let mut end = start + c.len_utf8();
+        let mut spaces = 1;
+        let mut nbsp = c == '\u{a0}';
+        while let Some((i, c)) = chars.next_if(|(_, c)| matches!(*c, ' ' | '\u{a0}')) {
+            end = i + c.len_utf8();
+            spaces += 1;
+            nbsp |= c == '\u{a0}';
+        }
+        let mut after = chars.clone();
+        let remove = after.next().is_some_and(|(_, c)| sentence_punctuation(c)) && {
+            while after.next_if(|(_, c)| "\"'»”’)]".contains(*c)).is_some() {}
+            after.peek().is_none_or(|(_, c)| is_py_space(*c))
+        };
+        if remove || nbsp {
+            let out = out.get_or_insert_with(|| String::with_capacity(result.len()));
+            out.push_str(&result[copied..start]);
+            if !remove {
+                for _ in 0..spaces {
+                    out.push(' ');
+                }
+            }
+            copied = end;
+        }
+    }
+    match out {
+        Some(mut out) => {
+            out.push_str(&result[copied..]);
+            Cow::Owned(out)
+        }
+        None => Cow::Borrowed(result),
+    }
+}
+
+fn match_bracket_spacing(original: &str, result: &str) -> String {
+    let typed: Vec<char> = original.chars().collect();
+    let out: Vec<char> = result.chars().collect();
+    let mut drop = vec![false; out.len()];
+    let mut add = vec![false; out.len() + 1];
+    for mark in "()[]{}\"«»“”„".chars() {
+        let a: Vec<usize> = typed.iter().enumerate().filter_map(|(i, c)| (*c == mark).then_some(i)).collect();
+        let b: Vec<usize> = out.iter().enumerate().filter_map(|(i, c)| (*c == mark).then_some(i)).collect();
+        if a.is_empty() || a.len() != b.len() {
+            continue;
+        }
+        for (&i, &j) in a.iter().zip(&b) {
+            for side in [-1isize, 1] {
+                let Some(ti) = i.checked_add_signed(side).filter(|&n| n < typed.len()) else { continue };
+                let Some(tj) = j.checked_add_signed(side).filter(|&n| n < out.len()) else { continue };
+                if out[tj] == ' ' && typed[ti] != ' ' {
+                    drop[tj] = true;
+                }
+                if out[tj] != ' ' && typed[ti] == ' ' {
+                    add[if side < 0 { j } else { j + 1 }] = true;
+                }
+            }
+        }
+    }
+    let mut s = String::new();
+    for (i, c) in out.iter().enumerate() {
+        if add[i] {
+            s.push(' ');
+        }
+        if !drop[i] {
+            s.push(*c);
+        }
+    }
+    s
+}
+
 /// `post_normalize(result, lang)`.
 pub fn post_normalize<'t>(result: &'t str, nemo: &str) -> Cow<'t, str> {
+    if symbol_words(nemo).is_some() {
+        return new_locale_post(result);
+    }
     if nemo == "pt" {
         return then(remove_space_before(result, ".!?,;:)]", true), remove_space_after_open);
     }
@@ -564,14 +1035,18 @@ fn split_groups(text: &str) -> Vec<String> {
 }
 
 /// `_SENTENCE_RE.split(text)`: `(?<=[.!?;:])\s+|(?<=[。！？])`.
-fn split_sentences(text: &str) -> Vec<String> {
+fn split_sentences(text: &str, native_punct: bool) -> Vec<String> {
     let c: Vec<char> = text.chars().collect();
     let mut pieces = Vec::new();
     let mut last = 0;
     let mut p = 0;
     let mut must_advance_at = usize::MAX;
     while p <= c.len() {
-        if p > 0 && ".!?;:".contains(c[p - 1]) && p < c.len() && is_py_space(c[p]) {
+        if p > 0
+            && (".!?;:".contains(c[p - 1]) || native_punct && "।۔؟؛։॥".contains(c[p - 1]))
+            && p < c.len()
+            && is_py_space(c[p])
+        {
             let mut j = p;
             while j < c.len() && is_py_space(c[j]) {
                 j += 1;
@@ -614,7 +1089,16 @@ fn normalize_once(text: &str, nemo: &str) -> Result<String, GrammarError> {
         Cow::Owned(s) => Some(s),
         Cow::Borrowed(_) => None,
     };
-    Ok(changed.unwrap_or(result))
+    let result = changed.unwrap_or(result);
+    Ok(
+        if symbol_words(nemo).is_some()
+            && text.chars().any(|c| matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '"' | '«' | '»' | '“' | '”' | '„'))
+        {
+            match_bracket_spacing(text, &result)
+        } else {
+            result
+        },
+    )
 }
 
 /// `_normalize_text`: whole text, then sentence by sentence after a failure.
@@ -626,7 +1110,7 @@ fn normalize_text(text: &str, nemo: &str) -> String {
     match normalize_once(&text, nemo) {
         Ok(s) => s,
         Err(_) => {
-            let pieces: Vec<String> = split_sentences(&text)
+            let pieces: Vec<String> = split_sentences(&text, symbol_words(nemo).is_some())
                 .into_iter()
                 .filter(|p| !py_strip(p).is_empty())
                 .map(|p| normalize_once(&p, nemo).unwrap_or(p))
@@ -874,6 +1358,26 @@ mod tests {
     }
 
     #[test]
+    fn new_locale_preprocessing_boundaries() {
+        assert_eq!(pre_normalize("2.", "pl"), "2.");
+        assert_eq!(pre_normalize("1990.", "pl"), "1990 .");
+        assert_eq!(pre_normalize("3. miejsce 1990. Potem", "pl"), "3. miejsce 1990 . Potem");
+        assert_eq!(pre_normalize("1. IV. 2024", "cs"), "1. IV. 2024");
+        assert_eq!(pre_normalize("5 - 10", "nl"), "5 - 10");
+        assert_eq!(pre_normalize("10 - 3 = 7", "nl"), "10 min 3 is gelijk aan 7");
+        assert_eq!(pre_normalize("C#5 &#5; #5", "pl"), "C#5 &#5 ; numer 5");
+        assert_eq!(pre_normalize("−₹5 2^3", "gu"), "-₹5 2 ની ઘાત 3");
+        assert_eq!(pre_normalize("5।” पुढे", "ml"), "5 ।” पुढे");
+    }
+
+    #[test]
+    fn new_locale_postprocessing_boundaries() {
+        assert_eq!(post_normalize("a\u{a0}b ।” c", "ml"), "a b।” c");
+        assert_eq!(match_bracket_spacing("(5) « 6 »", "( pięć ) « sześć »"), "(pięć) « sześć »");
+        assert_eq!(match_bracket_spacing("(5)", "bracket pięć"), "bracket pięć");
+    }
+
+    #[test]
     fn post_passes() {
         assert_eq!(post_normalize("dez por cento ; primeiro , segundo .", "pt"), "dez por cento; primeiro, segundo.");
         assert_eq!(post_normalize("( dez pessoas) vieram", "pt"), "(dez pessoas) vieram");
@@ -882,8 +1386,9 @@ mod tests {
 
     #[test]
     fn splitting() {
-        assert_eq!(split_sentences("a. b!  c"), ["a.", "b!", "c"]);
-        assert_eq!(split_sentences("一。二。 三"), ["一。", "二。", " 三"]);
+        assert_eq!(split_sentences("a. b!  c", false), ["a.", "b!", "c"]);
+        assert_eq!(split_sentences("一。二。 三", false), ["一。", "二。", " 三"]);
+        assert_eq!(split_sentences("एक। अगला", true), ["एक।", "अगला"]);
         assert_eq!(split_groups("I paid 5 \u{e000}kæt\u{e001} for"), ["I paid 5 ", "\u{e000}kæt\u{e001}", " for"]);
         let tags: Vec<Box<str>> = ["laugh", "shouting"].map(Box::from).into();
         assert_eq!(

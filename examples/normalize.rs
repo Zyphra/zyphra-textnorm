@@ -1,4 +1,4 @@
-//! `cargo run --release --example normalize -- <language> <text>` (language: en, de, es, fr, it, pt, ja, zh, ko):
+//! `cargo run --release --example normalize -- <language> <text>` (language codes: `zyphra_textnorm::LANGUAGES`):
 //! prints the normalized text.
 //! `DEBUG_TAGS=1` also prints each grammar call's tagged string on stderr.
 

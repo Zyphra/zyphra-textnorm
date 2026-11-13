@@ -26,9 +26,9 @@ zyphra_textnorm *zyphra_textnorm_new(const char *tags, size_t tags_len);
 /* Release a normalizer (NULL is a no-op). */
 void zyphra_textnorm_delete(zyphra_textnorm *tn);
 
-/* The spoken form of `text` in `language` (a grammar language: en, de, es, fr, it, pt, ja, zh, ko). Memoized. Never
- * fails: a language without a grammar comes back with its line breaks collapsed, and a sentence the grammar fails on
- * is kept as typed. Line breaks are collapsed first; markup and verbatim spans (U+E000 ... U+E001) stay as typed. */
+/* The spoken form of `text` in a grammar language (see README.md for the full list; query
+ * zyphra_textnorm_supported() for this build). Memoized. Never fails: an unsupported language comes back with its
+ * line breaks collapsed; a failing sentence is kept as typed. Markup and verbatim spans stay as typed. */
 char *zyphra_textnorm_normalize(const zyphra_textnorm *tn, const char *text, size_t text_len, const char *language,
                                 size_t language_len);
 

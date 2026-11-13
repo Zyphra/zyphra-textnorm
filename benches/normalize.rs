@@ -48,6 +48,40 @@ const CASES: &[(&str, &str)] = &[
     ("ja", "2021年3月5日の10時30分に5.5ドルを払った。"),
     ("zh", "2021年3月5日10点30分他花了5.5元。"),
     ("ko", "2021년 3월 5일 10시 30분에 5,000원을 냈다."),
+    ("nl", "Om 12:30 kostte 37 kg precies 125 euro."),
+    ("pl", "O 12:30 kupiłem 37 kg za 125 zł."),
+    ("tr", "Saat 12:30 için 37 kg ve 125 TL."),
+    ("uk", "О 12:30 придбали 37 кг за 125 грн."),
+    ("cs", "Ve 12:30 stálo 37 kg přesně 125 Kč."),
+    ("da", "Klokken 12:30 kostede 37 kg i alt 125 kr."),
+    ("fi", "Kello 12:30 ostin 37 kg hintaan 125 euroa."),
+    ("el", "Στις 12:30 αγόρασα 37 κιλά για 125 ευρώ."),
+    ("nb", "Klokken 12:30 kostet 37 kg i alt 125 kr."),
+    ("ro", "La 12:30 am cumpărat 37 kg pentru 125 lei."),
+    ("sk", "O 12:30 stálo 37 kg presne 125 eur."),
+    ("bg", "В 12:30 купих 37 кг за 125 лв."),
+    ("he", "בשעה 12:30 קניתי 37 קג במחיר 125 שח."),
+    ("th", "เวลา 12:30 ซื้อ 37 กก ราคา 125 บาท"),
+    ("tl", "Alas 12:30 bumili ng 37 kg sa 125 piso."),
+    ("ms", "Pada 12:30 saya membeli 37 kg dengan 125 ringgit."),
+    ("ka", "12:30 საათზე ვიყიდე 37 კგ 125 ლარად."),
+    ("ta", "12:30 மணிக்கு 37 கிலோ விலை 125 ரூபாய்."),
+    ("gu", "12:30 વાગ્યે 37 કિલો માટે 125 રૂપિયા."),
+    ("kn", "12:30 ಗಂಟೆಗೆ 37 ಕಿಲೋ ಬೆಲೆ 125 ರೂಪಾಯಿ."),
+    ("ml", "12:30 മണിക്ക് 37 കിലോ വില 125 രൂപ."),
+    ("pa", "12:30 ਵਜੇ 37 ਕਿਲੋ ਦੀ ਕੀਮਤ 125 ਰੁਪਏ।"),
+    ("or", "12:30 ବେଳେ 37 କିଲୋର ମୂଲ୍ୟ 125 ଟଙ୍କା।"),
+    ("ru", "В 12:30 купили 37 кг за 125 рублей."),
+    ("sv", "Klockan 12:30 kostade 37 kg totalt 125 kr."),
+    ("hu", "12:30 órakor 37 kg ára összesen 125 Ft."),
+    ("ar", "الساعة 12:30 ووزن 37 كجم بسعر 125 ريال."),
+    ("vi", "Lúc 12:30 mua 37 kg với giá 125 USD."),
+    ("id", "Pukul 12:30, 37 kg harganya Rp125.000."),
+    ("hi", "12:30 बजे 37 किलो की कीमत 125 रुपये है।"),
+    ("bn", "12:30 টায় 37 কিলোর দাম 125 টাকা।"),
+    ("te", "12:30 కు 37 కిలోల ధర 125 రూపాయలు."),
+    ("mr", "12:30 वाजता 37 किलोची किंमत 125 रुपये."),
+    ("ur", "12:30 بجے 37 کلو کی قیمت 125 روپے ہے۔"),
 ];
 
 const RUNS: usize = 101;
@@ -60,13 +94,18 @@ fn main() {
     );
     let tn = zyphra_textnorm::Normalizer::new();
     for &(lang, text) in CASES {
-        assert!(zyphra_textnorm::supported(lang), "no {lang} grammar in this build");
+        if !zyphra_textnorm::supported(lang) {
+            continue;
+        }
         for _ in 0..WARMUP {
             tn.clear_memo();
             black_box(tn.normalize(black_box(text), black_box(lang)));
         }
     }
     for &(lang, text) in CASES {
+        if !zyphra_textnorm::supported(lang) {
+            continue;
+        }
         let mut times = Vec::with_capacity(RUNS);
         let mut allocs = Vec::with_capacity(RUNS);
         for _ in 0..RUNS {

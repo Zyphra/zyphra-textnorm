@@ -347,7 +347,7 @@ impl Table {
     }
 
     /// Every row whose key equals `key`, in file order.
-    pub fn exact<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a Row> + 'a {
+    pub fn exact<'a>(&'a self, key: &str) -> impl Iterator<Item = &'a Row> {
         let lo = self.sorted.partition_point(|&i| self.rows[i as usize].key.as_str() < key);
         self.sorted[lo..].iter().map(|&i| &self.rows[i as usize]).take_while(move |r| r.key == key)
     }

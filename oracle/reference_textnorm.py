@@ -1,9 +1,9 @@
 """Frozen copy of ZONOS3's text-normalization wrapper (model/src/zonos3/tokenizer/textnorm.py of Zyphra/ZONOS3) as of
 the Rust port: the differential-test oracle.
 
-Runs only inside the oracle container (oracle/Dockerfile), where the NeMo r1.2.0 grammars and pynini are installed.
-The zonos3 imports are inlined; nothing else changed. Its language codes are ZONOS3's (`SERVER_TO_NEMO_LANG`); the
-goldens are keyed by the NeMo code.
+Runs with pynini installed, either natively or inside oracle/Dockerfile. Original locale behavior is frozen;
+the added ZONOS3 locale packages use the separately gated new_locale_wrapper module. Server language codes
+are translated through SERVER_TO_NEMO_LANG; goldens are keyed by the grammar package code.
 """
 
 from __future__ import annotations
@@ -30,6 +30,12 @@ SERVER_TO_NEMO_LANG: Dict[str, str] = {
     "cmn": "zh",
     "ko": "ko",
 }
+
+NEW_LANGS = frozenset("nl pl tr uk cs da fi el nb ro sk bg he th tl ms ka ta gu kn ml pa or ru sv hu ar vi id hi bn te mr ur".split())
+SERVER_TO_NEMO_LANG.update({lang: lang for lang in NEW_LANGS})
+import new_locale_wrapper
+
+_NEW_SENTENCE_RE = re.compile(r"(?<=[.!?;:।۔؟؛։॥])\s+|(?<=[。！？])")
 
 # zonos3.tts.markup, inlined.
 _NONVERBAL_MARKUP = re.compile(r"</?(?:laugh|breath|sigh|cough|panting|shouting|crying)\s*/?>")
@@ -118,6 +124,8 @@ def _en_money_k(m: "re.Match[str]") -> str:
 
 def pre_normalize(text: str, lang: str) -> str:
     """The language-specific rewrite applied right before the NeMo grammar (see the notes above)."""
+    if lang in NEW_LANGS:
+        return new_locale_wrapper.pre_normalize(text, lang)
     if lang in _CJK_LANGS:
         return _CJK_SPACE_RE.sub("", text)
     if lang == "de":
@@ -136,6 +144,8 @@ def pre_normalize(text: str, lang: str) -> str:
 
 def post_normalize(result: str, lang: str) -> str:
     """Re-attach the punctuation pre_normalize() spaced off."""
+    if lang in NEW_LANGS:
+        return new_locale_wrapper.post_normalize(result)
     if lang == "pt":
         result = _PT_SPACE_TRAIL_RE.sub(r"\1", result)
         return _PT_SPACE_LEAD_RE.sub(r"\1", result)
@@ -190,6 +200,7 @@ class TTSTextNormalizer:
             lang=lang,
             cache_dir=cache_dir,
             overwrite_cache=False,
+            deterministic=lang != "ru",
         )
 
         prefix = _VERBALIZER_FAR_PREFIX.get(lang)
@@ -223,7 +234,8 @@ class TTSTextNormalizer:
             result = normalizer.normalize(text_in, punct_post_process=lang in _MOSES_POSTPROCESS_LANGS)
         if not isinstance(result, str) or not result.strip():
             raise ValueError("empty normalizer output")
-        return post_normalize(result, lang)
+        result = post_normalize(result, lang)
+        return new_locale_wrapper.match_bracket_spacing(text, result) if lang in NEW_LANGS else result
 
     def normalize(self, text: str, language: str) -> str:
         key = (text, language)
@@ -276,7 +288,7 @@ class TTSTextNormalizer:
         except Exception:  # noqa: BLE001
             logger.exception("TTS text normalization failed for lang=%s; retrying sentence by sentence", language)
             pieces = []
-            for piece in _SENTENCE_RE.split(text):
+            for piece in (_NEW_SENTENCE_RE if lang in NEW_LANGS else _SENTENCE_RE).split(text):
                 if not piece or not piece.strip():
                     continue
                 try:

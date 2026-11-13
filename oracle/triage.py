@@ -39,6 +39,7 @@ SERVER_CODE = {
     "zh": "cmn",
     "ko": "ko",
 }
+SERVER_CODE.update({lang: lang for lang in ref.NEW_LANGS})
 
 
 def main() -> None:

@@ -1,0 +1,2 @@
+{"in": "101.", "reason": "number", "cost": 2.0799999237060547, "oracle_tags": "tokens { name: \"tisíc první\" }", "rust_tags": "tokens { name: \"sto první\" }"}
+{"in": "21/7", "reason": "order", "cost": 2.070000171661377, "oracle_tags": "tokens { name: \"dvě celé jedna sedmina\" }", "rust_tags": "tokens { name: \"dvě a jedna sedmina\" }"}

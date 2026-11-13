@@ -1,23 +1,25 @@
 # Porting a NeMo grammar to `zyphra-textnorm`
 
-How each `text_normalization/<lang>/` package of NeMo r1.2.0 becomes Rust under `src/lang/<lang>/`. The runtime
-around the grammars (`pipeline.rs`, `lattice.rs`, `tag.rs`, `permute.rs`, `moses.rs`, `punct_post.rs`, `wrapper.rs`)
-is finished; a port only supplies a `Grammar` (`pipeline.rs`). The upstream Python lives in
-`oracle/nemo_text_processing/text_normalization/`; it is the specification. The oracle container answers any question
-the source leaves open.
+How each reference `text_normalization/<lang>/` package becomes Rust under `src/lang/<lang>/`. The original nine
+packages use NeMo r1.2.0; the additional 34 use ZONOS3's production locale grammars and Unicode CLDR release-49 data.
+The runtime around the grammars (`pipeline.rs`, `lattice.rs`, `tag.rs`, `permute.rs`, `moses.rs`, `punct_post.rs`,
+`wrapper.rs`) is shared; a port supplies a `Grammar` (`pipeline.rs`). The Python under
+`oracle/nemo_text_processing/text_normalization/` is the specification. New locale wrapper rules are frozen in
+`oracle/new_locale_wrapper.py`, gated so original locale behavior stays unchanged.
 
 ## Contract
 
 ```rust
 pub trait Grammar: Send + Sync {
     fn code(&self) -> &'static str;                      // "en", "de", …
-    fn shape(&self) -> Shape;                            // lattice.rs: En | De | Fr | Ko | Pt | Cjk
+    fn shape(&self) -> Shape;                            // lattice.rs: exact token/punctuation/whitespace automaton
     fn classifiers(&self) -> &[Box<dyn Classifier>];     // the `classify` union, source order
     fn punct(&self) -> Option<&dyn Classifier>;          // the separately wrapped punct item (en-family)
+    fn pre_classify<'t>(&self, text: &'t [char]) -> Cow<'t, [char]> { Cow::Borrowed(text) }
     fn verbalize(&self, token: &Dict) -> Option<String>; // VerbalizeFinalFst on ONE token body, one field order
     fn verbalize_split(&self, split: &[Dict]) -> Option<String> { … } // default: token by token, joined
     fn token_join(&self) -> &'static str { " " }          // "" for zh/ja
-    fn post_process(&self, text: String) -> String { text } // en PostProcessingFst only
+    fn post_process(&self, text: String) -> String { text } // en/hi/vi PostProcessingFst
 }
 pub trait Classifier: Send + Sync {
     fn candidates(&self, text: &[char], start: usize, out: &mut Vec<Candidate>);
@@ -50,15 +52,39 @@ pub type Dict<'a> = Vec<Field<'a>>;
 - The punctuation classifier is `common::Punctuation` (see `en/taggers/punctuation.py`); zh/ja/ko list theirs among
   `classifiers()` with its weight.
 
+The added locale packages also use `Shape::Separated` (exactly one token-bearing item per whitespace-delimited
+chunk), `SeparatedWeighted` (the same topology, with a source weight on each internal whitespace separator),
+`SeparatedOrPunct` (a chunk can instead be one punctuation item), `SeparatedWithPunct` (a punctuation
+item run is also a chunk), and `Thai` (adjacent tokens with ASCII-space-only separators). Leading and trailing
+whitespace remains free in `SeparatedWeighted`. Choose the source graph's shape, not the closest older language shape.
+
 ## The tagger: every span, every output
 
 The FST accepts **all** spans; the Viterbi in `lattice.rs` picks the path. A classifier must therefore push every
 span it accepts at `start` (not just the longest) and, where the FST is non-functional for a span, every output
 with its own cost. Pruning is allowed only when a candidate provably can never be on a cheapest path (e.g. two
 outputs of one span with different costs and identical tags: keep the cheaper).
+Different tags can also be dominated when their candidates have the same start, end, and lattice transition kind
+but strictly higher cost. To skip a recognizer, prove its complete minimum cost, including every internal negative
+weight and range composition; preserve equal-cost paths and never compare token and punctuation transitions.
 
-The top-level `shape` enforces how tokens, punct items and whitespace runs may follow each other; whitespace never
-reaches a classifier as a span start (a classifier may still consume spaces *inside* its span when the FST does).
+The top-level `shape` enforces how tokens, punct items and whitespace runs may follow each other.
+The lattice skips recognition for an item kind only when no reachable automaton state can consume it.
+For example, a separated chunk cannot consume a second token before whitespace; this does not restrict
+spaces *inside* a single candidate span.
+
+A successful parser must account for its entire candidate span, not silently ignore unparsed fields. For example,
+Russian `1 мая 2024 г. важный текст` ends the date after `г.` and retains the following prose; recognizing the valid
+date prefix does not authorize swallowing the rest of the sentence.
+
+Character and lattice scratch buffers are thread-local; reusing their storage does not cache grammar results.
+The pipeline collapses repeated ASCII spaces in its owned output buffer rather than allocating a second copy.
+The first verbalized split becomes the result buffer directly; later splits append to it. A single split needs
+neither a second output allocation nor a copy of its complete spoken text.
+After tag serialization the lattice keeps the emptied path vector for reuse, dropping every candidate and tag.
+Reused storage also avoids recounting the back-pointer chain solely to preallocate the next result.
+Punctuation membership is indexed from the complete frozen mark set: a small low-code-point bitmap and a sorted
+table for higher code points. The bitmap boundary chooses storage, never the accepted character domain.
 
 Tag text is the expensive part: most candidates never reach the best path. A classifier may push candidates with an
 empty `tag` and write it in `materialize`, which the lattice calls once per best-path item, on the classifier that
@@ -66,6 +92,24 @@ pushed it. `(start, end, cost, rank)` must then identify the candidate among tho
 classifiers (a language's single union entry) forward `materialize` to the member that pushed the winner. Rather than
 rerunning that member, record what the winning branch read during exploration (es: `Lazy::recall` + `Stash`, cleared
 at position 0) and write only its tag.
+`materialize` is called for every winning candidate, including candidates whose tag was already written: preserve
+nonempty tags, especially compound tokens. Recognition prefilters must conservatively include the frozen lexical
+input keys (including exceptional suffixes), rather than guessing script ranges or unit-ending characters.
+Compound paths must materialize their selected children before embedding them: Vietnamese `~1.5` and `~1/2` retain
+the decimal/fraction child after `khoảng`, rather than constructing a nonempty wrapper around an empty lazy tag.
+Russian `time.hours` and `measure.cardinal.integer` already hold the complete spoken phrase, including units.
+Their exact-shape split writers normalize typed NBSP without adding another unit or allocating a token-sized string.
+The Russian union checks complete currency/preposition starters once and can apply first-space family-death rules
+ahead of time only for digit-free words; a shorter serial span containing a digit must remain eligible.
+Input digits follow the source maps: Unicode `Nd` is not interchangeable with NeMo's ASCII `NEMO_DIGIT`.
+Indonesian clock recognition keeps validated integer values, not spoken strings; selected clock, grouped-money, and
+grouped-measure paths write their fields directly into one tag buffer. Fast selected renderers must preserve the
+original source-row and branch order, including an earlier non-integer money witness at the same cost. Lexical lookup
+indexes may reject impossible first bytes or byte lengths only when built from all frozen keys. Indonesian money
+starter eligibility is checked once per lattice start: every accepted amount shares its initial digit with the full
+remaining input. Selected-span materialization reuses the union's UTF-8 scratch buffer, not a stored output.
+Date eligibility can be retired after the first word only when that word is neither a numeric/quoted starter,
+a source date prefix, nor a frozen month name or abbreviation; later digits cannot revive such a path.
 
 ## Weights and ties
 
@@ -129,6 +173,15 @@ logic that builds lists (`for x in labels: …`) runs once at table-load time in
 `str.upper()` only where NeMo uses `TO_UPPER`; `str.lower()`/`capitalize()` are Unicode in Python — use Rust's
 `to_lowercase`/`text::py_capitalize`).
 
+Pynini's method-form `project()` and other mutating FST operations can change an object shared by later graph
+branches. Port the resulting graph, not the variable's earlier definition. Hindi and Urdu date ranges accept
+projected spoken single-digit words rather than written single digits; Swedish ordinal magnitudes compose with
+the cardinal's exposed unpadded component. Confirm such domains with the actual component FST.
+
+An unwrapped `name` does not imply one universal verbalizer. Some source word graphs retain NBSP while
+class wrappers convert it to ASCII space; Vietnamese's range verbalizer additionally accepts non-whitespace names
+containing literal quotes. Preserve the complete verbalizer union and intentional no-path errors.
+
 ## Verifying a port
 
 1. Goldens: `tests/golden/<l>.jsonl.zst` (zstd; `zstd -d -k` for a plain copy) rows
@@ -141,6 +194,8 @@ logic that builds lists (`for x in labels: …`) runs once at table-load time in
    `docker run --rm -v "$PWD":/repo -v "$HOME/.cache/zyphra-textnorm-oracle":/cache -w /repo zyphra-textnorm-oracle python oracle/triage.py --lang <l> --raw --text "…"`
    (`--tagged 'tokens { … }'` runs only the verbalizer; `--file` batches; `--score` prices taggings; grammars are
    cached in `/cache`). Under Rosetta each container start costs ~5-20 s; batch queries with `--file`.
+   After editing oracle grammar sources, use a fresh `--cache` directory: the standalone oracle reuses existing
+   FAR archives without the production normalizer's source fingerprint.
 4. Parity: every grammar call (`calls` test) and every end-to-end row (`golden` test) equals the oracle, except the
    listed ties ("Ties"); 0 mismatches and 0 stale ties. Any other difference is a port bug.
 5. Speed: `cargo bench` (all languages, at load < 4: timings swing 1.5× above it), median

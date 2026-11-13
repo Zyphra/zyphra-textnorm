@@ -5,10 +5,10 @@ build-backend = "maturin"
 [project]
 name = "zyphra-textnorm"
 dynamic = ["version"]
-description = "Text normalization for TTS (written form to spoken form) in nine languages: Rust ports of the NeMo r1.2.0 grammars"
+description = "Text normalization for TTS in 43 languages: native Rust ports of NeMo and ZONOS3 grammars"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT AND Apache-2.0"
+license = "MIT AND Apache-2.0 AND Unicode-3.0"
 license-files = ["LICENSE", "NOTICE", "licenses/*"]
 keywords = ["tts", "text-normalization", "speech", "nemo"]
 classifiers = [

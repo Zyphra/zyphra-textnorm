@@ -202,7 +202,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zyphra-textnorm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruzstd",
  "serde",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "zyphra-textnorm-py"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pyo3",
  "zyphra-textnorm",
