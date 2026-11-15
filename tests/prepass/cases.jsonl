@@ -1,0 +1,253 @@
+{"group": "Dogfood reports", "lang": "en", "text": "a $350 billion data center", "out": "a three hundred fifty billion dollar data center", "target": "a three hundred fifty billion dollar data center", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Read pages 5–10. The temperature is -5°C.", "out": "Read pages five to ten. The temperature is minus five degrees Celsius.", "target": "Read pages five to ten. The temperature is minus five degrees Celsius.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Dr. Smith lives on Oak Dr. St. Paul is near Main St.", "out": "doctor Smith lives on Oak Drive. Saint Paul is near Main Street.", "target": "Doctor Smith lives on Oak Drive. Saint Paul is near Main Street.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Please install version 1.2.3.", "out": "Please install version one point two point three.", "target": "Please install version one point two point three.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "`Storage::validate_artifact_owner_admission` before source work", "out": "'Storage validate underscore artifact underscore owner underscore admission' before source work", "target": "Storage validate artifact owner admission before source work", "status": "differs"}
+{"group": "Dogfood reports", "lang": "en", "text": "cnode-[7,14,23,33,47,50,70,72,74,104-105,110,146,150,186,199]", "out": "cnode seven, fourteen, twenty three, thirty three, forty seven, fifty, seventy, seventy two, seventy four, one hundred and four to one hundred and five, one hundred and ten, one hundred and forty six, one hundred and fifty, one hundred and eighty six, one hundred and ninety nine", "target": "cnode seven, fourteen, twenty three, thirty three, forty seven, fifty, seventy, seventy two, seventy four, one hundred and four to one hundred and five, one hundred and ten, one hundred and forty six, one hundred and fifty, one hundred and eighty six, one hundred and ninety nine", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "We're open Mon. through Fri. The next meeting is in Sept.", "out": "We're open Monday through Friday. The next meeting is in September.", "target": "We're open Monday through Friday. The next meeting is in September.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Order No. 5 is ready. No, order No. 6 is not ready", "out": "Order number five is ready. No, order number six is not ready", "target": "Order number five is ready. No, order number six is not ready", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The file is 5 MB. The connection transfers 5 Mb per second.", "out": "The file is five megabytes. The connection transfers five megabits per second.", "target": "The file is five megabytes. The connection transfers five megabits per second.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The cable is 5 m long. The project costs $5M.", "out": "The cable is five meters long. The project costs five million dollars.", "target": "The cable is five meters long. The project costs five million dollars.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Ms. Green measured a delay of 25 ms.", "out": "Miz Green measured a delay of twenty five milliseconds.", "target": "Miz Green measured a delay of twenty five milliseconds.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The vial holds 2 mL. The reservoir holds 2 ML.", "out": "The vial holds two milliliters. The reservoir holds two M L.", "target": "The vial holds two milliliters. The reservoir holds two megaliters.", "status": "differs"}
+{"group": "Dogfood reports", "lang": "en", "text": "Wait 2–3 mins, not 2–3 hrs. The final step takes 30 secs.", "out": "Wait two to three minutes, not two to three hours The final step takes thirty seconds", "target": "Wait two to three minutes, not two to three hours. The final step takes thirty seconds.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Thanks, @alex! Your entry is #1 in the #VoiceAI challenge.", "out": "Thanks, at alex! Your entry is number one in the VoiceAI challenge.", "target": "Thanks, at alex! Your entry is number one in the VoiceAI challenge.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Call +1 (202) 555-0147, extension 007.", "out": "Call plus one, two zero two, five five five, zero one four seven, extension zero zero seven.", "target": "Call plus one, two oh two, five five five, oh one four seven, extension double-oh seven.", "status": "differs"}
+{"group": "Dogfood reports", "lang": "en", "text": "The total is ₹1,25,000.", "out": "The total is one lakh twenty five thousand rupees.", "target": "The total is one lakh twenty five thousand rupees.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "She's 5′11″ tall. The shelf is 2′6″ wide.", "out": "She's five foot eleven tall. The shelf is two feet six inches wide.", "target": "She's five foot eleven tall. The shelf is two feet six inches wide.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Resize the image from 1920×1080 to 1280×720.", "out": "Resize the image from nineteen twenty by ten eighty to twelve eighty by seven hundred and twenty.", "target": "Resize the image from nineteen twenty by ten eighty to twelve eighty by seven twenty.", "status": "differs"}
+{"group": "Dogfood reports", "lang": "en", "text": "The label lists H₂O, CO₂, and O₂.", "out": "The label lists H two O, C O two, and O two.", "target": "The label lists H two O, C O two, and O two.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The measured value is 3.2 × 10⁻⁵.", "out": "The measured value is three point two times ten to the minus five.", "target": "The measured value is three point two times ten to the minus five.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "If x ≤ 5 and y ≠ 0, then x ÷ y is defined.", "out": "If x is less than or equal to five and y is not equal to zero, then x divided by y is defined.", "target": "If x is less than or equal to five and y is not equal to zero, then x divided by y is defined.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The mixture uses a 13:1 ratio.", "out": "The mixture uses a thirteen to one ratio.", "target": "The mixture uses a thirteen to one ratio.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "The operating range is −20 - 5°C.", "out": "The operating range is minus twenty to five degrees Celsius.", "target": "The operating range is minus twenty to five degrees Celsius.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "so morning my time / afternoon yours would work best.", "out": "so morning my time slash afternoon yours would work best.", "target": "so morning my time slash afternoon yours would work best.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "i don't know how to pronounce ϕ", "out": "i don't know how to pronounce phi", "target": "i don't know how to pronounce phi", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "…artificial intelligence agents, 1Password is aiming…", "out": "...artificial intelligence agents, one Password is aiming...", "target": "", "status": "open"}
+{"group": "Dogfood reports", "lang": "en", "text": "• Fuzzy Wuzzy was a bear. Fuzzy Wuzzy had no hair. Fuzzy Wuzzy wasn't very fuzzy, was he?", "out": "Fuzzy Wuzzy was a bear. Fuzzy Wuzzy had no hair. Fuzzy Wuzzy wasn't very fuzzy, was he?", "target": "", "status": "open"}
+{"group": "Dogfood reports", "lang": "en", "text": "The bass swam past the bass drum.", "out": "The bass swam past the bass drum.", "target": "", "status": "open"}
+{"group": "Dogfood reports", "lang": "en", "text": "…The most powerful AIs in the world can't hear how you feel.", "out": "...The most powerful AIs in the world can't hear how you feel.", "target": "", "status": "open"}
+{"group": "Dogfood reports", "lang": "en", "text": "gimme the gabagool", "out": "gimme the gabagool", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "don`t do that", "out": "don't do that", "target": "don't do that", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Run `pip install zonos` first.", "out": "Run 'pip install zonos' first.", "target": "Run 'pip install zonos' first.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Use ``smart'' quotes", "out": "Use \"smart'' quotes", "target": "Use \"smart\" quotes", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is **really** important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is *really* important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "*a few words here* and **a few more**", "out": "a few words here and a few more", "target": "a few words here and a few more", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "***both*** and **_mixed_**", "out": "both and mixed", "target": "both and mixed", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "the *only* one, and *this* one", "out": "the only one, and this one", "target": "the only one, and this one", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "**$5** only", "out": "five dollars only", "target": "five dollars only", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Prices start at $5*", "out": "Prices start at five dollars asterisk", "target": "Prices start at five dollars asterisk", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "*not closed and not *closed either", "out": "asterisk not closed and not asterisk closed either", "target": "asterisk not closed and not asterisk closed either", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "2 * 3 = 6 and a * b", "out": "two times three equals six and a times b", "target": "two times three equals six and a times b", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "5*3*2", "out": "five times three times two", "target": "five times three times two", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Dial *67 then the number.", "out": "Dial star sixty seven then the number.", "target": "Dial star sixty seven then the number.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "What the f*ck", "out": "What the f asterisk ck", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "2**10 and x**2", "out": "two to the tenth and x squared", "target": "two to the tenth and x squared", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is _really_ important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is __really__ important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "_italic phrase here_ ok", "out": "italic phrase here ok", "target": "italic phrase here ok", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "word_secondword and snake_case_name", "out": "word underscore secondword and snake underscore case underscore name", "target": "word underscore secondword and snake underscore case underscore name", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "_private and my_var_", "out": "underscore private and my underscore var underscore", "target": "underscore private and my underscore var underscore", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "call __init__ first", "out": "call init first", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "def __init__(self):", "out": "def __init__(self):", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "Fill in the ____ blank.", "out": "Fill in the blank.", "target": "Fill in the blank.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "* first item\n* second item", "out": "first item. second item.", "target": "First item. Second item.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "- first item\n- second item", "out": "first item. second item.", "target": "First item. Second item.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "+ first\n+ second", "out": "first. second.", "target": "first. second.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "• one\n• two", "out": "one. two.", "target": "one. two.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "- [ ] buy milk\n- [x] call mom", "out": "buy milk. call mom.", "target": "buy milk. call mom.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "- 5 apples\n- 10 pears", "out": "five apples. ten pears.", "target": "five apples. ten pears.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "1. first\n2. second", "out": "one. first two. second", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "# Heading\nBody text.", "out": "Heading. Body text.", "target": "Heading. Body text.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "#1 priority", "out": "number one priority", "target": "number one priority", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "> quoted line\nreply", "out": "quoted line reply", "target": "quoted line reply", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "> 5 years of experience", "out": "more than five years of experience", "target": "more than five years of experience", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Intro\n---\nAfter the rule", "out": "Intro After the rule", "target": "Intro After the rule", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "```python\nprint('hi')\n```", "out": "print('hi')", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "| a | b |\n|---|---|\n| 1 | 2 |", "out": "a, b. one, two.", "target": "a, b. one, two.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<b>bold</b> and <i>italic</i>", "out": "bold and italic", "target": "bold and italic", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<p>One.</p><p>Two.</p>", "out": "One. Two.", "target": "One. Two.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<br>line<br/>break", "out": "line break", "target": "line break", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<span class=\"x\">styled</span> text", "out": "styled text", "target": "styled text", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<insert name here>", "out": "insert name here", "target": "insert name here", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Dear <name>, welcome", "out": "Dear name, welcome", "target": "Dear name, welcome", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<big-laugh/> and <sound_effect/>", "out": "big laugh and sound effect", "target": "big laugh and sound effect", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<whisper>be quiet</whisper> please", "out": "whisper be quiet whisper please", "target": "whisper be quiet whisper please", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<singing> haleluja </singing>", "out": "singing haleluja singing", "target": "singing haleluja singing", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<pitch=-.3>la la</pitch>", "out": "pitch equals negative point three la la pitch", "target": "pitch equals negative point three la la pitch", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<voice id=\"3\"/>Hello there", "out": "Hello there", "target": "Hello there", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "a < b and c > d", "out": "a is less than b and c is greater than d", "target": "a is less than b and c is greater than d", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "x<y and y>z", "out": "x is less than y and y is greater than z", "target": "x is less than y and y is greater than z", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Email <gabe@zyphra.com>", "out": "Email gabe at zyphra dot com", "target": "Email gabe at zyphra dot com", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "So I said <laugh/> no way", "out": "So I said laugh no way", "target": "So I said laugh no way", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "<script>alert(1)</script>Hello", "out": "Hello", "target": "Hello", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Tom &amp; Jerry and &lt;b&gt;", "out": "Tom and Jerry and <b>", "target": "Tom and Jerry and <b>", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "AT&T and R&D", "out": "AT and T and R and D", "target": "AT and T and R and D", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "See [the docs](https://zyphra.com/docs) for more.", "out": "See the docs for more.", "target": "See the docs for more.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "![logo](logo.png) Welcome", "out": "Welcome", "target": "Welcome", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Music tag [Music] stays", "out": "Music tag [Music] stays", "target": "Music tag [Music] stays", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "~~gone~~ and ~gone~", "out": "gone and gone", "target": "gone and gone", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "~5 minutes", "out": "about five minutes", "target": "about five minutes", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "I love it 😀 👍🏽", "out": "I love it grinning face emoji thumbs up emoji", "target": "I love it grinning face emoji thumbs up emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "I ❤️ NY", "out": "I red heart emoji NY", "target": "I red heart emoji NY", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "😂😂😂 so funny", "out": "face with tears of joy emoji so funny", "target": "face with tears of joy emoji so funny", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "That's 🔥💯", "out": "That's fire emoji hundred points emoji", "target": "That's fire emoji hundred points emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Flying to 🇯🇵 tomorrow 👨‍💻", "out": "Flying to Japan flag emoji tomorrow man technologist emoji", "target": "Flying to Japan flag emoji tomorrow man technologist emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Press 1️⃣ to continue", "out": "Press one to continue", "target": "Press one to continue", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Rated ★★★★☆ by critics", "out": "Rated four out of five stars by critics", "target": "Rated four out of five stars by critics", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "© 2026 Zyphra™ ▶ Play", "out": "copyright twenty twenty six Zyphra trademark ▶ Play", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "I love it :smile: :+1:", "out": "I love it grinning face with smiling eyes emoji thumbs up emoji", "target": "I love it grinning face with smiling eyes emoji thumbs up emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "10:30:45 and Note:this", "out": "ten hours thirty minutes and forty five seconds and Note:this", "target": "ten hours thirty minutes and forty five seconds and Note: this", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "#VoiceAI rocks", "out": "VoiceAI rocks", "target": "VoiceAI rocks", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Loving it #blessed #tbt", "out": "Loving it blessed tbt", "target": "Loving it blessed tbt", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "#VoiceAI #TTS #AI", "out": "VoiceAI TTS AI", "target": "VoiceAI TTS AI", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "# Release notes\nWe shipped it.", "out": "Release notes. We shipped it.", "target": "Release notes. We shipped it.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Follow #ZyphraAI for updates.", "out": "Follow ZyphraAI for updates.", "target": "Follow ZyphraAI for updates.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Great launch! #ZONOS3", "out": "Great launch! ZONOS three", "target": "Great launch! ZONOS three", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "#voice_ai", "out": "voice underscore ai", "target": "voice underscore ai", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Issue #42 and PR #7", "out": "Issue number forty two and PR number seven", "target": "Issue number forty two and PR number seven", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "13 #and and #II Leoline", "out": "thirteen hash and and hash II Leoline", "target": "thirteen hash and and hash II Leoline", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "#100DaysOfCode starts today", "out": "one hundred Days Of Code starts today", "target": "one hundred days of code starts today", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "The # of users doubled.", "out": "The number of users doubled.", "target": "The number of users doubled.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Set the color to #FF5733 or #fff.", "out": "Set the color to FF five thousand seven hundred thirty three or fff.", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "see docs.html#install and a#b", "out": "see docs.html hash install and a hash b", "target": "", "status": "open"}
+{"group": "Markup", "lang": "es", "text": "Me encanta #VidaSana", "out": "Me encanta VidaSana", "target": "Me encanta VidaSana", "status": "matches"}
+{"group": "Markup", "lang": "ja", "text": "今日は #東京 で", "out": "今日は東京で", "target": "今日は東京で", "status": "matches"}
+{"group": "Markup", "lang": "hi", "text": "धन्यवाद #भारत", "out": "धन्यवाद भारत", "target": "धन्यवाद भारत", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "C# and F# minor", "out": "C sharp and F sharp minor", "target": "C sharp and F sharp minor", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "`Storage::validate_artifact_owner_admission`", "out": "'Storage validate underscore artifact underscore owner underscore admission'", "target": "", "status": "open"}
+{"group": "Markup", "lang": "en", "text": "This is ***really*** important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "**Note:** read this.", "out": "Note: read this.", "target": "Note: read this.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is ~really~ important.", "out": "This is really important.", "target": "This is really important.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "This is ~~struck~~ text.", "out": "This is struck text.", "target": "This is struck text.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "## Results\nIt worked.", "out": "Results. It worked.", "target": "Results. It worked.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Visit https://www.zyphra.com/zonos today.", "out": "Visit zyphra dot com slash zonos today.", "target": "Visit zyphra dot com slash zonos today.", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "Tom &amp; Jerry", "out": "Tom and Jerry", "target": "Tom and Jerry", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "I love it 😀", "out": "I love it grinning face emoji", "target": "I love it grinning face emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "I love it :smile:", "out": "I love it grinning face with smiling eyes emoji", "target": "I love it grinning face with smiling eyes emoji", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "a | b", "out": "a vertical bar b", "target": "a vertical bar b", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "2^10", "out": "two to the tenth", "target": "two to the tenth", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "A → B", "out": "A to B", "target": "A to B", "status": "matches"}
+{"group": "Markup", "lang": "en", "text": "about ≈ 5", "out": "about five", "target": "about five", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "±0.5 dB", "out": "plus or minus zero point five decibels", "target": "plus or minus zero point five decibels", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "60 km/h or 37 mph", "out": "sixty kilometers per hour or thirty seven miles per hour", "target": "sixty kilometers per hour or thirty seven miles per hour", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "4K at 60fps, 1080p", "out": "four K at sixty FPS, ten eighty p", "target": "four K at sixty FPS, ten eighty p", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "GPT-4o and H100s", "out": "GPT-four o and H one hundreds", "target": "GPT four o and H one hundreds", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "1e-5 learning rate", "out": "one e minus five learning rate", "target": "one e minus five learning rate", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "World War II and Henry VIII", "out": "World War two and Henry the eighth", "target": "World War two and Henry the eighth", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "and/or he/she w/ w/o", "out": "and slash or he or she with without", "target": "and slash or, he or she, with, without", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "GPUs and TPUs and PCs", "out": "GPUs and TPUs and PCs", "target": "GPUs and TPUs and PCs", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Section 2.3.1", "out": "Section two point three point one", "target": "Section two point three point one", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "v2.0 release", "out": "v two point oh release", "target": "v two point oh release", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Two sentences.No space", "out": "Two sentences. No space", "target": "Two sentences. No space", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Fig. 3 and Eq. 2", "out": "Figure three and Equation two", "target": "Figure three and equation two", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "approx. 5", "out": "approximately five", "target": "approximately five", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "pp. 5–10", "out": "pages five to ten", "target": "pages five to ten", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Main St. and Elm Ave. and Sunset Blvd.", "out": "Main Street and Elm Avenue and Sunset Boulevard.", "target": "Main Street and Elm Avenue and Sunset Boulevard", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "5 Mbps and 100 GB", "out": "five megabits per second and one hundred gigabytes", "target": "five megabits per second and one hundred gigabytes", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "½ cup and ¼ tsp", "out": "one half cup and one quarter teaspoon", "target": "one half cup and one quarter teaspoon", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "1990–2000", "out": "nineteen ninety to two thousand", "target": "nineteen ninety to two thousand", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "the U.S. and the UK", "out": "the US and the UK", "target": "the US and the UK", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Mx. Lee", "out": "Mix Lee", "target": "Mix Lee", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "TL;DR it works", "out": "T L D R, it works", "target": "T L D R, it works", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Edit /usr/bin/python or C:\\Users\\me", "out": "edit slash usr slash bin slash python or C:\\Users\\me", "target": "edit slash usr slash bin slash python or C users me", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "macOS 14.2.1 is out.", "out": "macOS fourteen point two point one is out.", "target": "macOS fourteen point two point one is out.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Python 3.12 and 3.11.4", "out": "Python three point twelve and three point eleven point four", "target": "Python three point twelve and three point eleven point four", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "the 2010s and the 2020s", "out": "the twenty tens and the twenty twenties", "target": "the twenty tens and the twenty twenties", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "the 80's", "out": "the eighties", "target": "the eighties", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "twelve 12s and three 4s", "out": "twelve twelve S and three four S", "target": "twelve twelve S and three four S", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Rate it 5/10 stars", "out": "Rate it five out of ten stars", "target": "Rate it five out of ten stars", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "The meeting is Tue 5/6 at 3.", "out": "The meeting is Tuesday may sixth at three.", "target": "The meeting is Tuesday May sixth at three.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "10 / 5", "out": "ten divided by five", "target": "ten divided by five", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "10 / 2 = 5", "out": "ten divided by two equals five", "target": "ten divided by two equals five", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "x = 5 and f(x) = 2x", "out": "x equals five and f of x equals two x", "target": "x equals five and f of x equals two x", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "5 >= 3 and 5 != 3", "out": "five is greater than or equal to three and five is not equal to three", "target": "five is greater than or equal to three and five is not equal to three", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "3 x 3 = 9 and 10 x 5 cards", "out": "three times three equals nine and ten x five cards", "target": "three times three equals nine and ten x five cards", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "a 2x4 board, 12 x 12 mm tiles", "out": "a two x four board, twelve by twelve millimeters tiles", "target": "a two x four board, twelve by twelve millimeters tiles", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "2.5k views and 1M users", "out": "two point five thousand views and one million users", "target": "two point five thousand views and one million users", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "2 tbsp, 3 tsp, 5 yrs, 6 mos, 2 wks", "out": "two tablespoons, three teaspoons, five years, six months, two weeks", "target": "two tablespoons, three teaspoons, five years, six months, two weeks", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "I'm 5 ft 11 in tall.", "out": "I'm five feet eleven inches tall.", "target": "I'm five feet eleven inches tall.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Use a #2 pencil. It's the No. 1 song.", "out": "Use a number two pencil. It's the number one song.", "target": "Use a number two pencil. It's the number one song.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Sen. Jones met Prof. Lee and John Smith Sr.", "out": "Senator Jones met Professor Lee and John Smith Senior.", "target": "Senator Jones met Professor Lee and John Smith Senior.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Turn onto 5th St. and park.", "out": "Turn onto fifth Street and park.", "target": "Turn onto fifth Street and park.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Chapter IV and Louis XIV", "out": "Chapter four and Louis the fourteenth", "target": "Chapter four and Louis the fourteenth", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Super Bowl LVIII, Elizabeth II, Rocky III, Part II", "out": "Super Bowl fifty eight, Elizabeth the second, Rocky three, Part two", "target": "Super Bowl fifty eight, Elizabeth the second, Rocky three, Part two", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Henry I and Paul I think so", "out": "Henry the first and Paul I think so", "target": "Henry the first and Paul I think so", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "It costs 99¢ or 5€.", "out": "It costs ninety nine cents or five euros.", "target": "It costs ninety nine cents or five euros.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "She got a B- in C++ and .NET", "out": "She got a B minus in C plus plus and dot net", "target": "She got a B minus in C plus plus and dot net", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Status: n/a", "out": "Status: N A", "target": "Status: N A", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Hello.World and end.Start", "out": "Hello. World and end. Start", "target": "Hello. World and end. Start", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "FY2024 results", "out": "FY twenty twenty four results", "target": "FY twenty twenty four results", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "HTTP/2 is faster", "out": "HTTP two is faster", "target": "HTTP two is faster", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "5 Ω resistor and 10 kΩ", "out": "five ohms resistor and ten kilohms", "target": "five ohms resistor and ten kilohms", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "50‰ and 0.5 dB", "out": "fifty per mille and zero point five decibels", "target": "fifty per mille and zero point five decibels", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "x² + y² = r²", "out": "x squared plus y squared equals r squared", "target": "x squared plus y squared equals r squared", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "5 m² and 10 km²", "out": "five square meters and ten square kilometers", "target": "five square meters and ten square kilometers", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "H100s and GPUs", "out": "H one hundreds and GPUs", "target": "H one hundreds and GPUs", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "60 km/h", "out": "sixty kilometers per hour", "target": "sixty kilometers per hour", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Due Mon. at noon; closed Sat. and Sun.", "out": "Due Monday at noon; closed Saturday and Sunday.", "target": "Due Monday at noon; closed Saturday and Sunday.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "We orbit the Sun. Jan. was cold. I met Jan.", "out": "We orbit the Sun. January was cold. I met Jan.", "target": "We orbit the Sun. January was cold. I met Jan.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Mount St. Helens and St. Paul", "out": "Mount Saint Helens and Saint Paul", "target": "Mount Saint Helens and Saint Paul", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "The Dr. said to rest.", "out": "The doctor said to rest.", "target": "The doctor said to rest.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Born 13.11.2026 in Berlin", "out": "Born the thirteenth of november twenty twenty six in Berlin", "target": "Born the thirteenth of november twenty twenty six in Berlin", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Ping 192.168.1.1", "out": "Ping one nine two dot one six eight dot one dot one", "target": "Ping one nine two dot one six eight dot one dot one", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Call 555-123-4567 or 555-1234", "out": "Call five five five, one two three, four five six seven or five five five, one two three four", "target": "Call five five five, one two three, four five six seven or five five five, one two three four", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Due 2026-11-13, COVID-19, I-95", "out": "Due november thirteenth twenty twenty six, COVID-nineteen, I-ninety five", "target": "Due november thirteenth twenty twenty six, COVID-nineteen, I-ninety five", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "John 3:16 and Psalm 23:4", "out": "John three sixteen and Psalm twenty three: four", "target": "John three sixteen and Psalm twenty three four", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "We hired 5 ML engineers.", "out": "We hired five M L engineers.", "target": "We hired five M L engineers.", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "Meet at 10:30, a 3:1 ratio", "out": "Meet at ten thirty, a three to one ratio", "target": "Meet at ten thirty, a three to one ratio", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "localhost:8771 and port 8080", "out": "localhost eighty seven seventy one and port eighty eighty", "target": "localhost eighty seven seventy one and port eighty eighty", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "It's 1:00:00 long", "out": "It's one hour long", "target": "It's one hour long", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "the 405 freeway and I-210", "out": "the four oh five freeway and I two ten", "target": "the four oh five freeway and I two ten", "status": "matches"}
+{"group": "Unreported", "lang": "en", "text": "etc. and so on", "out": "etcetera and so on", "target": "etcetera and so on", "status": "matches"}
+{"group": "Unreported", "lang": "ja", "text": "今日は５月３日です。", "out": "今日は五月三日です。", "target": "今日は五月三日です。", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "The height dropped by 76 mm.", "out": "The height dropped by seventy six millimeters.", "target": "The height dropped by seventy six millimeters.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "The chips are 12 mm × 12 mm, or 12mm x 12mm.", "out": "The chips are twelve millimeters by twelve millimeters, or twelve millimeters by twelve millimeters.", "target": "The chips are twelve millimeters by twelve millimeters, or twelve millimeters by twelve millimeters.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "We sampled 12 ha of forest.", "out": "We sampled twelve hectares of forest.", "target": "We sampled twelve hectares of forest.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "SD cards start at 0 MB/s.", "out": "SD cards start at zero megabytes per second.", "target": "SD cards start at zero megabytes per second.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "g = 9.81 m/s² and v = 5 km/s", "out": "g equals nine point eight one meters per second squared and v equals five kilometers per second", "target": "g equals nine point eight one meters per second squared and v equals five kilometers per second", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "It took 4.52 s to fall and 12 s total.", "out": "It took four point five two seconds to fall and twelve seconds total.", "target": "It took four point five two seconds to fall and twelve seconds total.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "Arsenic below 50 mg/L and 3 g/kg", "out": "Arsenic below fifty milligrams per liter and three grams per kilogram", "target": "Arsenic below fifty milligrams per liter and three grams per kilogram", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "Add 5 g of sugar to 2 L of water.", "out": "Add five grams of sugar to two liters of water.", "target": "Add five grams of sugar to two liters of water.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "a 12 V battery, a 60 W bulb and a 5 mm drill bit", "out": "a twelve volt battery, a sixty watt bulb and a five millimeter drill bit", "target": "a twelve volt battery, a sixty watt bulb and a five millimeter drill bit", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "It draws 500 mA at 5 kPa, 70 dB and 400 ppm", "out": "It draws five hundred milliamps at five kilopascals, seventy decibels and four hundred parts per million", "target": "It draws five hundred milliamps at five kilopascals, seventy decibels and four hundred parts per million", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "A machine with 4 GB keeps 256 MB for the host.", "out": "A machine with four gigabytes keeps two hundred and fifty six megabytes for the host.", "target": "A machine with four gigabytes keeps two hundred and fifty six megabytes for the host.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "BDST: 13:16 HRS", "out": "BDST: thirteen sixteen hours", "target": "BDST: thirteen sixteen hours", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "a 1,700-mile pipeline", "out": "a one thousand seven hundred-mile pipeline", "target": "a one thousand seven hundred-mile pipeline", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "the 2,800-mile journey and a 60,000-kilometer trip", "out": "the two thousand eight hundred-mile journey and a sixty thousand-kilometer trip", "target": "the two thousand eight hundred-mile journey and a sixty thousand-kilometer trip", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "(ri=0) means no redundancy", "out": "(ri equals zero) means no redundancy", "target": "(ri equals zero) means no redundancy", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "aged 35±1.7 years", "out": "aged thirty five plus or minus one point seven years", "target": "aged thirty five plus or minus one point seven years", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "27.8%–29.3% for men and 5%-10% for women", "out": "twenty seven point eight percent to twenty nine point three percent for men and five percent to ten percent for women", "target": "twenty seven point eight percent to twenty nine point three percent for men and five percent to ten percent for women", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "It was adopted by NATO.The development began.", "out": "It was adopted by NATO. The development began.", "target": "It was adopted by NATO. The development began.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "1.Treat each other with respect.", "out": "one. Treat each other with respect.", "target": "one. Treat each other with respect.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "the Arabian diaries,1913–1914.", "out": "the Arabian diaries,nineteen thirteen to nineteen fourteen.", "target": "the Arabian diaries,nineteen thirteen to nineteen fourteen.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "as shown in (13,14) and (12,18-21)", "out": "as shown in (thirteen, fourteen) and (twelve, eighteen to twenty one)", "target": "as shown in (thirteen, fourteen) and (twelve, eighteen to twenty one)", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "an area of 4π", "out": "an area of four pi", "target": "an area of four pi", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "the March/April 1996 issue", "out": "the march slash april nineteen ninety six issue", "target": "the march slash april nineteen ninety six issue", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "20 digital input/output pins for HIV/AIDS programs", "out": "twenty digital input slash output pins for hiv slash aids programs", "target": "twenty digital input slash output pins for HIV slash AIDS programs", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "September 2001–November 2001", "out": "september two thousand one to november two thousand one", "target": "september two thousand one to november two thousand one", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "Feb 2004 – Hwang Woo-suk was named", "out": "february two thousand four — Hwang Woo-suk was named", "target": "february two thousand four — Hwang Woo-suk was named", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "Martin IV and Pope Celestine V", "out": "Martin the fourth and Pope Celestine the fifth", "target": "Martin the fourth and Pope Celestine the fifth", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "^ Spear, Kevin. (2001)", "out": "circumflex Spear, Kevin. (two thousand one)", "target": "circumflex Spear, Kevin. (two thousand one)", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "| Short Link: news-line.com", "out": "vertical bar Short Link: news dash line dot com", "target": "vertical bar Short Link: news dash line dot com", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "~ Walter Savage Landor", "out": "tilde Walter Savage Landor", "target": "tilde Walter Savage Landor", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "B-ROLL INCLUDES: * animation illustrating risk", "out": "B-ROLL INCLUDES: asterisk animation illustrating risk", "target": "B-ROLL INCLUDES: asterisk animation illustrating risk", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "There is an endnote (marked by the *)", "out": "There is an endnote (marked by the asterisk)", "target": "There is an endnote (marked by the asterisk)", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "a 5G network at 73°W", "out": "a five G network at seventy three degrees west", "target": "a five G network at seventy three degrees west", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "The summit is at 40°26′46″N, 79°58′56″W.", "out": "The summit is at forty degrees twenty six minutes forty six seconds north, seventy nine degrees fifty eight minutes fifty six seconds west.", "target": "The summit is at forty degrees twenty six minutes forty six seconds north, seventy nine degrees fifty eight minutes fifty six seconds west.", "status": "matches"}
+{"group": "Found in fineweb", "lang": "en", "text": "the 4s and 5s, Keystone XL, the CCC", "out": "the four S and five S, Keystone XL, the CCC", "target": "the four S and five S, Keystone XL, the CCC", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "What is 10 - 5?", "out": "What is ten minus five?", "target": "What is ten minus five?", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "10 - 5 is 5.", "out": "ten minus five is five.", "target": "ten minus five is five.", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "We need n - 1 layers.", "out": "We need n minus one layers.", "target": "We need n minus one layers.", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "It takes 5 - 10 minutes.", "out": "It takes five to ten minutes.", "target": "It takes five to ten minutes.", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "pages 5-10", "out": "pages five to ten", "target": "pages five to ten", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "Read pages 5–10.", "out": "Read pages five to ten.", "target": "Read pages five to ten.", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "10 - 5 = 5", "out": "ten minus five equals five", "target": "ten minus five equals five", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "the score was 3-2", "out": "the score was three to two", "target": "the score was three to two", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "The Lakers won 110 - 105.", "out": "The Lakers won one hundred and ten to one hundred and five.", "target": "The Lakers won one ten to one oh five.", "status": "differs"}
+{"group": "Minus or range", "lang": "en", "text": "a 5-10% drop", "out": "a five to ten percent drop", "target": "a five to ten percent drop", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "ages 18-25", "out": "ages eighteen to twenty five", "target": "ages eighteen to twenty five", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "5 − 3 = 2", "out": "five minus three equals two", "target": "five minus three equals two", "status": "matches"}
+{"group": "Minus or range", "lang": "en", "text": "It is 10 - 5 outside.", "out": "It is ten to five outside.", "target": "", "status": "open"}
+{"group": "Minus or range", "lang": "en", "text": "ISBN 978-0", "out": "ISBN nine hundred and seventy eight-zero", "target": "", "status": "open"}

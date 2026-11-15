@@ -13,5 +13,6 @@ name = "zyphra_textnorm"
 crate-type = ["cdylib"]
 
 [dependencies]
-zyphra-textnorm = { path = ".." }
+# The wheel ships the opt-in pre-pass (Normalizer(prepass=True)).
+zyphra-textnorm = { path = "..", features = ["prepass"] }
 pyo3 = { version = "0.30", features = ["abi3-py39"] }

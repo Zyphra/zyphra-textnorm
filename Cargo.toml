@@ -94,8 +94,14 @@ lang-ur = []
 # The C ABI (include/zyphra_textnorm.h). Build the static library with
 # `cargo rustc --release --lib --features capi --crate-type staticlib`.
 capi = []
+# The opt-in pre-pass for chat and markdown text (src/prepass/, `Normalizer::with_prepass`). Off by default: it is the
+# only feature with dependencies (fancy-regex for the rules' lookarounds and backreferences, regex for a fast
+# prefilter that skips a rule when it cannot match).
+prepass = ["dep:fancy-regex", "dep:regex"]
 
 [dependencies]
+fancy-regex = { version = "0.20", optional = true }
+regex = { version = "1", optional = true }
 
 [dev-dependencies]
 # The goldens are committed zstd-compressed (tests/golden/*.jsonl.zst); pure-Rust decoder.

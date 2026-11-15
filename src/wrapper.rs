@@ -1269,6 +1269,8 @@ impl Memo {
 pub struct Normalizer {
     tags: Vec<Box<str>>,
     memo: Mutex<Memo>,
+    #[cfg(feature = "prepass")]
+    prepass: bool,
 }
 
 impl Default for Normalizer {
@@ -1291,7 +1293,33 @@ impl Normalizer {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        Normalizer { tags: tags.into_iter().map(|t| t.as_ref().into()).collect(), memo: Mutex::new(Memo::new()) }
+        Normalizer {
+            tags: tags.into_iter().map(|t| t.as_ref().into()).collect(),
+            memo: Mutex::new(Memo::new()),
+            #[cfg(feature = "prepass")]
+            prepass: false,
+        }
+    }
+
+    /// This normalizer with the opt-in pre-pass on or off ([`crate::prepass`], feature `prepass`): markdown, HTML,
+    /// emoji, look-alike characters and English readings rewritten before the grammars run. Off, every output is the
+    /// NeMo-parity output.
+    ///
+    /// ```
+    /// let tn = zyphra_textnorm::Normalizer::new().with_prepass(true);
+    /// assert_eq!(tn.normalize("This is **really** important.", "en"), "This is really important.");
+    /// ```
+    #[cfg(feature = "prepass")]
+    pub fn with_prepass(mut self, on: bool) -> Self {
+        self.prepass = on;
+        self.clear_memo();
+        self
+    }
+
+    /// Whether the pre-pass runs ([`Normalizer::with_prepass`]).
+    #[cfg(feature = "prepass")]
+    pub fn prepass(&self) -> bool {
+        self.prepass
     }
 
     /// The markup tags this normalizer keeps, in order.
@@ -1311,9 +1339,19 @@ impl Normalizer {
         if let Some(hit) = self.memo.lock().unwrap_or_else(|e| e.into_inner()).get(text, lang) {
             return hit;
         }
-        let result = normalize_uncached(text, language, &self.tags);
+        let result = self.normalize_fresh(text, language);
         self.memo.lock().unwrap_or_else(|e| e.into_inner()).insert(text, lang, result.clone());
         result
+    }
+
+    fn normalize_fresh(&self, text: &str, language: &str) -> String {
+        #[cfg(feature = "prepass")]
+        if self.prepass {
+            // the pre-pass keeps a word as typed by marking it verbatim (U+E000 … U+E001); the marks it added go
+            let (pre, _, added) = crate::prepass::apply_spans(text, language, &self.tags);
+            return crate::prepass::strip_added_marks(&normalize_uncached(&pre, language, &self.tags), &added);
+        }
+        normalize_uncached(text, language, &self.tags)
     }
 
     /// Empty the memo.

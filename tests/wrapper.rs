@@ -110,3 +110,26 @@ fn vietnamese_approximation_materializes_selected_children() {
         assert_eq!(zyphra_textnorm::normalize(text, "vi"), expected);
     }
 }
+
+/// With the opt-in pre-pass a tag that is not a configured markup tag is removed before the grammar runs (outside
+/// English its name, an English word, is not spoken), so the sentence around it is normalized; a configured tag is
+/// kept as before. `only_the_given_tags_split_the_text` above is the pre-pass-off contract.
+#[cfg(all(feature = "lang-ja", feature = "prepass"))]
+#[test]
+fn prepass_reads_around_an_unconfigured_tag() {
+    let text = "今日は3日 <breath/> です";
+    let on =
+        |tags: &[&str]| Normalizer::with_markup_tags(tags.iter().copied()).with_prepass(true).normalize(text, "ja");
+    assert_eq!(on(&["breath"]), "今日は三日 <breath/> です");
+    assert_eq!(on(&["laugh"]), "今日は三日です");
+    assert_eq!(on(&[]), "今日は三日です");
+}
+
+#[cfg(all(feature = "lang-en", feature = "prepass"))]
+#[test]
+fn prepass_keeps_configured_markup() {
+    let tn = Normalizer::with_markup_tags(["laugh"]).with_prepass(true);
+    assert_eq!(tn.normalize("So I said <laugh/> no **way**, $5.", "en"), "So I said <laugh/> no way, five dollars.");
+    assert_eq!(tn.normalize("<singing> haleluja </singing>", "en"), "singing haleluja singing");
+    assert_eq!(tn.normalize("I paid 5 \u{e000}kæt\u{e001} for GPUs", "en"), "I paid five \u{e000}kæt\u{e001} for GPUs");
+}

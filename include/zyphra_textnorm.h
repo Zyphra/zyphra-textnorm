@@ -23,6 +23,12 @@ typedef struct zyphra_textnorm zyphra_textnorm;
  * zyphra_textnorm_delete. */
 zyphra_textnorm *zyphra_textnorm_new(const char *tags, size_t tags_len);
 
+/* zyphra_textnorm_new with the opt-in pre-pass on (markdown, HTML, emoji, look-alike characters and English readings
+ * rewritten before the grammars run). Only in a library built with the `prepass` feature as well:
+ *
+ *   cargo rustc --release --lib --features capi,prepass --crate-type staticlib */
+zyphra_textnorm *zyphra_textnorm_new_prepass(const char *tags, size_t tags_len);
+
 /* Release a normalizer (NULL is a no-op). */
 void zyphra_textnorm_delete(zyphra_textnorm *tn);
 

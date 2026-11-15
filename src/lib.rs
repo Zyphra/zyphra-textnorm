@@ -31,6 +31,8 @@ pub mod moses;
 pub mod permute;
 #[doc(hidden)]
 pub mod pipeline;
+#[cfg(feature = "prepass")]
+pub mod prepass;
 #[doc(hidden)]
 pub mod punct_post;
 #[doc(hidden)]

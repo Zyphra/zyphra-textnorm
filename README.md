@@ -53,6 +53,29 @@ zyphra_textnorm_delete(tn);
 - **Memo**: each `Normalizer` remembers its last 1024 results, shared by every thread that calls it;
   `normalize(text, lang)` uses one shared normalizer without markup tags.
 
+### Pre-pass for chat and markdown text (opt-in)
+
+With the `prepass` cargo feature (on in the Python wheel), `Normalizer::with_prepass(true)` /
+`Normalizer(prepass=True)` / `zyphra_textnorm_new_prepass` rewrites the text before the grammars run, for what a
+speech model is actually given: markdown (emphasis, bullets, headings, tables, links, code fences), HTML/SSML tags and
+entities, emoji (their CLDR names in English), look-alike characters, and English readings the grammars get wrong
+(units, ranges, versions, powers, decades, abbreviations, URLs, …). Off by default, and off every output is the parity
+output.
+
+```python
+tn = zyphra_textnorm.Normalizer(prepass=True)
+tn.normalize("This is **really** important 😀 — see https://www.zyphra.com/zonos", "en")
+# 'This is really important grinning face emoji — see zyphra dot com slash zonos'
+zyphra_textnorm.prepass("#VoiceAI rocks", "en")   # the pre-pass alone, with the rules that fired
+# ('VoiceAI rocks', [('md.hashtag', '#VoiceAI', 'VoiceAI')])
+```
+
+The 59 rules (`src/prepass/`, in the order of `prepass::ORDER`) were prototyped in Python and reviewed against the
+golden files and NeMo's own tests; each is narrow on purpose (configured markup tags and verbatim spans are never
+touched, most rules are English only). `tests/prepass.rs` pins every golden row the pre-pass changes
+(`tests/prepass/golden.jsonl`, with whether its output was reviewed) and checks that it changes no other row. The
+feature adds the crate's only dependencies, `fancy-regex` and `regex`.
+
 The output is the spoken form of the reference grammars, quirks included: parity is the contract. The original
 packages retain the frozen NeMo wrapper behavior (`oracle/reference_textnorm.py`); new locale packages use the
 locale-gated ZONOS3 wrapper (`oracle/new_locale_wrapper.py`). This covers sentence punctuation, native symbol and
@@ -76,7 +99,7 @@ typed). A build with `panic = "abort"` aborts on one instead.
 
 | Path | Contents |
 | --- | --- |
-| `src/` | The library: `lib.rs` (API), `wrapper.rs` (line breaks, markup, verbatim spans, per-language passes, sentence retry, memo), `pipeline.rs` (NeMo's `Normalizer.normalize`), `lattice.rs` (the tagger's Viterbi), `tag.rs`, `permute.rs`, `moses.rs`, `punct_post.rs`, `ffi.rs` (C ABI) |
+| `src/` | The library: `lib.rs` (API), `wrapper.rs` (line breaks, markup, verbatim spans, per-language passes, sentence retry, memo), `pipeline.rs` (NeMo's `Normalizer.normalize`), `lattice.rs` (the tagger's Viterbi), `tag.rs`, `permute.rs`, `moses.rs`, `punct_post.rs`, `ffi.rs` (C ABI), `prepass/` (the opt-in pre-pass; its tables in `data/prepass/`, written by `oracle/prepass_tables.py`) |
 | `src/lang/<l>/` | One grammar package: `taggers/` and `verbalizers/` mirror the upstream files one to one |
 | `data/` | The upstream `.tsv` tables verbatim, the sacremoses perluniprops tables, frozen Unicode 15.0 tables |
 | `include/` | The C header |
@@ -89,6 +112,7 @@ typed). A build with `panic = "abort"` aborts on one instead.
 
 ```sh
 cargo test --release --features capi       # unit tests + differential tests against the goldens
+cargo test --release --features prepass    # + the pre-pass (tests/prepass.rs)
 cargo run --release --example normalize -- en 'Save $20k.'
 cargo bench                                # median µs per call and per 100 chars, allocations
 cargo bench --no-default-features --features lang-de   # one language, faster to build
