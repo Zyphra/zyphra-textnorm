@@ -132,13 +132,12 @@ below 4: medians swing by 1.5× on a busy machine. The target is ≤ 20 µs per 
 ## Release
 
 The crate and the Python package share the version (`[workspace.package]` in `Cargo.toml`). Pushing a `v<version>`
-tag runs `.github/workflows/release.yml`, which builds the wheels and the sdist and installs and runs each wheel on
-its platform. Then:
-
-```sh
-cargo publish -p zyphra-textnorm                                  # crates.io
-gh run download <run id> -D dist && uv publish dist/*/*           # PyPI
-```
+tag runs `.github/workflows/release.yml`: it builds the wheels and the sdist and installs and runs each wheel on its
+platform, then checks that the tag is `v` + the `Cargo.toml` version, runs `cargo publish -p zyphra-textnorm`, and
+uploads the wheels and the sdist to PyPI. Both registries use trusted publishing (no tokens in the repository): the
+crates.io and PyPI projects trust `Zyphra/zyphra-textnorm`, workflow `release.yml`, environments `crates-io` and
+`pypi`. A failed publish job is re-run from the run page; `gh workflow run release.yml --ref v<version>` reruns the
+whole release for an existing tag.
 
 ## Parity
 

@@ -1,7 +1,8 @@
 name: release
 
-# The PyPI distributions: one abi3 wheel per platform (CPython >= 3.9) and the sdist. Each wheel is installed and run
-# on its own platform. Uploading them is manual (README, "Release").
+# The release: one abi3 wheel per platform (CPython >= 3.9) and the sdist, each wheel installed and run on its own
+# platform. On a `v*` tag, once every build has passed, the crate goes to crates.io and then the wheels and the sdist go
+# to PyPI, both by trusted publishing (README, "Release"). A dispatch on a branch only builds.
 on:
   push:
     tags: ["v*"]
@@ -57,3 +58,46 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
+
+  crates:
+    needs: [wheel, sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/zyphra-textnorm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tag matches the version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "zyphra-textnorm") | .version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the Cargo.toml version $version"
+            exit 1
+          fi
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish -p zyphra-textnorm --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # After the crate, so a failed crates.io publish (version check, verification build) leaves PyPI untouched.
+  pypi:
+    needs: crates
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/zyphra-textnorm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
