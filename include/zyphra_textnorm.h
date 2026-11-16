@@ -19,15 +19,17 @@ extern "C" {
 typedef struct zyphra_textnorm zyphra_textnorm;
 
 /* A normalizer that keeps the markup of `tags` as typed: a '\n'-separated list of tag names (`tags_len` bytes;
- * NULL / 0 keeps none). "laugh\nshouting" keeps <laugh/>, <laugh> and <shouting>...</shouting>. Released with
- * zyphra_textnorm_delete. */
+ * NULL / 0 keeps none). "laugh\nshouting" keeps <laugh/>, <laugh> and <shouting>...</shouting>. The pre-pass
+ * (markdown, HTML, emoji, look-alike characters and each language's readings of numbers, dates, money, phone numbers,
+ * addresses and equations rewritten before the grammars run) is on when the library has the `prepass` feature, as the
+ * default build does. Released with zyphra_textnorm_delete. */
 zyphra_textnorm *zyphra_textnorm_new(const char *tags, size_t tags_len);
 
-/* zyphra_textnorm_new with the opt-in pre-pass on (markdown, HTML, emoji, look-alike characters and English readings
- * rewritten before the grammars run). Only in a library built with the `prepass` feature as well:
- *
- *   cargo rustc --release --lib --features capi,prepass --crate-type staticlib */
+/* zyphra_textnorm_new with the pre-pass on. Only in a library built with the `prepass` feature (the default). */
 zyphra_textnorm *zyphra_textnorm_new_prepass(const char *tags, size_t tags_len);
+
+/* zyphra_textnorm_new without the pre-pass: every output is the NeMo-parity output. */
+zyphra_textnorm *zyphra_textnorm_new_parity(const char *tags, size_t tags_len);
 
 /* Release a normalizer (NULL is a no-op). */
 void zyphra_textnorm_delete(zyphra_textnorm *tn);

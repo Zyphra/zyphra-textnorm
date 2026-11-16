@@ -9,7 +9,7 @@ struct Normalizer(core_tn::Normalizer);
 #[pymethods]
 impl Normalizer {
     #[new]
-    #[pyo3(signature = (markup_tags=Vec::new(), prepass=false))]
+    #[pyo3(signature = (markup_tags=Vec::new(), prepass=true))]
     fn new(markup_tags: Vec<String>, prepass: bool) -> Self {
         Normalizer(core_tn::Normalizer::with_markup_tags(markup_tags).with_prepass(prepass))
     }
@@ -33,14 +33,14 @@ impl Normalizer {
     }
 }
 
-/// The spoken form of `text` in `language`, by a shared normalizer without markup tags.
+/// The spoken form of `text` in `language`, by a shared normalizer without markup tags (the pre-pass on).
 #[pyfunction]
 fn normalize(py: Python<'_>, text: &str, language: &str) -> String {
     py.detach(|| core_tn::normalize(text, language))
 }
 
 /// The pre-pass alone: the rewritten text and each rewrite as (rule, before, after). For inspecting the rules; the
-/// normalizer runs it itself with `prepass=True`.
+/// normalizer runs it itself unless `prepass=False`.
 #[pyfunction]
 #[pyo3(signature = (text, language, markup_tags=Vec::new()))]
 fn prepass(

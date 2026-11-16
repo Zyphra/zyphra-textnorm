@@ -3,6 +3,15 @@
 
 use zyphra_textnorm::{Normalizer, collapse_line_breaks, normalize, supported};
 
+/// A normalizer without the pre-pass (the NeMo-parity output), for the asserts that pin the grammars' own reading.
+#[allow(dead_code)]
+fn parity(tags: &[&str]) -> Normalizer {
+    let tn = Normalizer::with_markup_tags(tags.iter().copied());
+    #[cfg(feature = "prepass")]
+    let tn = tn.with_prepass(false);
+    tn
+}
+
 #[test]
 fn unsupported_language_only_collapses_line_breaks() {
     let tn = Normalizer::with_markup_tags(["laugh"]);
@@ -74,11 +83,12 @@ mod en {
 #[test]
 fn only_the_given_tags_split_the_text() {
     // golden ja row: a kept marker splits the text and each side is normalized alone; read as text (no tags, or other
-    // tags), the grammar has no path through `3日 <breath/>` and the sentence stays as typed.
+    // tags), the grammar has no path through `3日 <breath/>` and the sentence stays as typed. (The pre-pass removes an
+    // unconfigured tag first: `prepass_reads_around_an_unconfigured_tag`.)
     let text = "今日は3日 <breath/> です";
-    assert_eq!(Normalizer::with_markup_tags(["breath"]).normalize(text, "ja"), "今日は三日 <breath/> です");
-    assert_eq!(Normalizer::with_markup_tags(["laugh"]).normalize(text, "ja"), text);
-    assert_eq!(normalize(text, "ja"), text);
+    assert_eq!(parity(&["breath"]).normalize(text, "ja"), "今日は三日 <breath/> です");
+    assert_eq!(parity(&["laugh"]).normalize(text, "ja"), text);
+    assert_eq!(parity(&[]).normalize(text, "ja"), text);
 }
 
 #[cfg(feature = "lang-id")]
@@ -97,8 +107,9 @@ fn repeated_currency_ranges_require_positive_endpoints() {
 #[cfg(feature = "lang-ru")]
 #[test]
 fn russian_dates_keep_following_text() {
+    // the grammar's own е (the pre-pass writes четвёртого)
     assert_eq!(
-        zyphra_textnorm::normalize("1 мая 2024 г. важный текст", "ru"),
+        parity(&[]).normalize("1 мая 2024 г. важный текст", "ru"),
         "первое мая две тысячи двадцать четвертого года важный текст"
     );
 }
@@ -111,7 +122,7 @@ fn vietnamese_approximation_materializes_selected_children() {
     }
 }
 
-/// With the opt-in pre-pass a tag that is not a configured markup tag is removed before the grammar runs (outside
+/// With the pre-pass a tag that is not a configured markup tag is removed before the grammar runs (outside
 /// English its name, an English word, is not spoken), so the sentence around it is normalized; a configured tag is
 /// kept as before. `only_the_given_tags_split_the_text` above is the pre-pass-off contract.
 #[cfg(all(feature = "lang-ja", feature = "prepass"))]

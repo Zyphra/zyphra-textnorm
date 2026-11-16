@@ -57,6 +57,20 @@ pub unsafe extern "C" fn zyphra_textnorm_new_prepass(tags: *const c_char, tags_l
 /// See `zyphra_textnorm.h`.
 ///
 /// # Safety
+/// `tags` is NULL or a `\n`-separated list of `tags_len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zyphra_textnorm_new_parity(tags: *const c_char, tags_len: usize) -> *mut Normalizer {
+    // SAFETY: forwarded caller contract.
+    let tags = unsafe { input(tags, tags_len) };
+    let tn = Normalizer::with_markup_tags(tags.split('\n').filter(|t| !t.is_empty()));
+    #[cfg(feature = "prepass")]
+    let tn = tn.with_prepass(false);
+    Box::into_raw(Box::new(tn))
+}
+
+/// See `zyphra_textnorm.h`.
+///
+/// # Safety
 /// `tn` is NULL or a pointer returned by `zyphra_textnorm_new` and not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zyphra_textnorm_delete(tn: *mut Normalizer) {

@@ -206,6 +206,8 @@ fn calls() {
 fn golden() {
     let mut total_bad = 0usize;
     let tn = Normalizer::with_markup_tags(ORACLE_MARKUP_TAGS);
+    #[cfg(feature = "prepass")]
+    let tn = tn.with_prepass(false); // the goldens are NeMo's output; tests/prepass.rs checks the pre-pass on them
     for lang in selected() {
         let Some(g) = zyphra_textnorm::lang::grammar(lang) else { continue };
         let ties = ties(lang);

@@ -24,7 +24,7 @@ assert_eq!(tn.normalize("So I said <laugh/> no way, $5.", "en"), "So I said <lau
 import zyphra_textnorm
 
 zyphra_textnorm.normalize("Am 3. Oktober kostete es 5,32 €.", "de")
-# 'Am dritter oktober kostete es fünf komma drei zwei €.'
+# 'Am dritten Oktober kostete es fünf Euro zweiunddreißig.'
 tn = zyphra_textnorm.Normalizer(markup_tags=["laugh"])
 tn.normalize("So I said <laugh/> no way, $5.", "en")
 ```
@@ -53,36 +53,44 @@ zyphra_textnorm_delete(tn);
 - **Memo**: each `Normalizer` remembers its last 1024 results, shared by every thread that calls it;
   `normalize(text, lang)` uses one shared normalizer without markup tags.
 
-### Pre-pass for chat and markdown text (opt-in)
+### Pre-pass for chat and markdown text (on by default)
 
-With the `prepass` cargo feature (on in the Python wheel), `Normalizer::with_prepass(true)` /
-`Normalizer(prepass=True)` / `zyphra_textnorm_new_prepass` rewrites the text before the grammars run, for what a
-speech model is actually given: markdown (emphasis, bullets, headings, tables, links, code fences), HTML/SSML tags and
-entities, emoji (their CLDR names in English), look-alike characters, and English readings the grammars get wrong
-(units, ranges, versions, powers, decades, abbreviations, URLs, …). Off by default, and off every output is the parity
-output.
+Since 0.3.0 every normalizer (`Normalizer::new()`, `normalize()`, `Normalizer()` in Python, `zyphra_textnorm_new`)
+rewrites the text before the grammars run, for what a speech model is actually given: markdown (emphasis, bullets, headings, tables, links, code fences), HTML/SSML tags and
+entities, emoji (named in the text's language from CLDR 46: “grinning face emoji”, “emoji cara sonriendo”), ohm units
+in every language, look-alike characters, and readings the grammars get wrong in every language: number agreement
+(gender, case, Korean native counters, Hebrew/Arabic reverse agreement), money, dates, times, years, ranges, units,
+abbreviations, email addresses, phone numbers, suffixes glued to numbers, and English units, ranges, versions,
+powers, decades, and equations (2 - 7 = -5 → es “dos menos siete es igual a menos cinco”). Turned off
+(`Normalizer::with_prepass(false)`, `Normalizer(prepass=False)`, `zyphra_textnorm_new_parity`), every output is the
+parity output, as in 0.2.0. The pre-pass is the `prepass` cargo feature, in the default features; a build without it
+is dependency-free and has only the parity output.
 
 ```python
-tn = zyphra_textnorm.Normalizer(prepass=True)
+tn = zyphra_textnorm.Normalizer()
 tn.normalize("This is **really** important 😀 — see https://www.zyphra.com/zonos", "en")
 # 'This is really important grinning face emoji — see zyphra dot com slash zonos'
+zyphra_textnorm.Normalizer(prepass=False).normalize("This is **really** important", "en")   # NeMo parity
+# 'This is asterisk asterisk really asterisk asterisk important'
 zyphra_textnorm.prepass("#VoiceAI rocks", "en")   # the pre-pass alone, with the rules that fired
 # ('VoiceAI rocks', [('md.hashtag', '#VoiceAI', 'VoiceAI')])
 ```
 
-The 59 rules (`src/prepass/`, in the order of `prepass::ORDER`) were prototyped in Python and reviewed against the
-golden files and NeMo's own tests; each is narrow on purpose (configured markup tags and verbatim spans are never
-touched, most rules are English only). `tests/prepass.rs` pins every golden row the pre-pass changes
-(`tests/prepass/golden.jsonl`, with whether its output was reviewed) and checks that it changes no other row. The
+The rules were prototyped in Python and reviewed against the golden files and NeMo's own tests; each is narrow on
+purpose (configured markup tags and verbatim spans are never touched). The 61 markup, character and English rules are
+in `src/prepass/` (in the order of `prepass::ORDER`); 410 per-language rules and 6 shared ones are in
+`src/prepass/lang/` (`<lang>.rs`, `shared.rs`), each a port of its prototype module, checked against the prototype's
+output by `tests/prepass/lang/<lang>.jsonl.zst`. `tests/prepass.rs` pins every golden row the pre-pass changes
+(`tests/prepass/golden.jsonl.zst`, with whether its output was reviewed) and checks that it changes no other row. The
 feature adds the crate's only dependencies, `fancy-regex` and `regex`.
 
-The output is the spoken form of the reference grammars, quirks included: parity is the contract. The original
-packages retain the frozen NeMo wrapper behavior (`oracle/reference_textnorm.py`); new locale packages use the
-locale-gated ZONOS3 wrapper (`oracle/new_locale_wrapper.py`). This covers sentence punctuation, native symbol and
-operator words, ordinal periods, numeric conventions, bracket spacing, and markup/verbatim preservation. Numeric
-dates follow locale conventions (`tl` uses month/day/year); ISO `YYYY-MM-DD` avoids ambiguity.
-Dutch million and billion remainders use the corrected fixed-width source grammar, preventing omitted zero groups
-from changing the number's scale.
+With the pre-pass off, the output is the spoken form of the reference grammars, quirks included: parity is the
+contract. The original packages retain the frozen NeMo wrapper behavior (`oracle/reference_textnorm.py`); new locale
+packages use the locale-gated ZONOS3 wrapper (`oracle/new_locale_wrapper.py`). This covers sentence punctuation,
+native symbol and operator words, ordinal periods, numeric conventions, bracket spacing, and markup/verbatim
+preservation. Numeric dates follow locale conventions (`tl` uses month/day/year); ISO `YYYY-MM-DD` avoids ambiguity.
+Dutch million and billion remainders use the corrected fixed-width source grammar, preventing omitted zero groups from
+changing the number's scale.
 
 ## Install
 
@@ -111,8 +119,7 @@ typed). A build with `panic = "abort"` aborts on one instead.
 ## Develop
 
 ```sh
-cargo test --release --features capi       # unit tests + differential tests against the goldens
-cargo test --release --features prepass    # + the pre-pass (tests/prepass.rs)
+cargo test --release --features capi       # unit tests, the goldens (pre-pass off) and the pre-pass (tests/prepass.rs)
 cargo run --release --example normalize -- en 'Save $20k.'
 cargo bench                                # median µs per call and per 100 chars, allocations
 cargo bench --no-default-features --features lang-de   # one language, faster to build

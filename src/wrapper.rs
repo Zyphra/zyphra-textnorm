@@ -1297,17 +1297,19 @@ impl Normalizer {
             tags: tags.into_iter().map(|t| t.as_ref().into()).collect(),
             memo: Mutex::new(Memo::new()),
             #[cfg(feature = "prepass")]
-            prepass: false,
+            prepass: true,
         }
     }
 
-    /// This normalizer with the opt-in pre-pass on or off ([`crate::prepass`], feature `prepass`): markdown, HTML,
-    /// emoji, look-alike characters and English readings rewritten before the grammars run. Off, every output is the
-    /// NeMo-parity output.
+    /// This normalizer with the pre-pass on (the default) or off ([`crate::prepass`], feature `prepass`): markdown,
+    /// HTML, emoji, look-alike characters and each language's readings of numbers, dates, money, phone numbers,
+    /// addresses and equations rewritten before the grammars run. Off, every output is the NeMo-parity output.
     ///
     /// ```
-    /// let tn = zyphra_textnorm::Normalizer::new().with_prepass(true);
+    /// let tn = zyphra_textnorm::Normalizer::new();
     /// assert_eq!(tn.normalize("This is **really** important.", "en"), "This is really important.");
+    /// let parity = zyphra_textnorm::Normalizer::new().with_prepass(false);
+    /// assert_eq!(parity.normalize("2 - 7 = -5", "es"), "dos - siete = menos cinco");
     /// ```
     #[cfg(feature = "prepass")]
     pub fn with_prepass(mut self, on: bool) -> Self {

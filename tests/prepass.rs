@@ -1,7 +1,7 @@
 //! The opt-in pre-pass (`--features prepass`, `Normalizer::with_prepass`).
 //!
 //! - `golden`: every golden row (`tests/golden/`) through a pre-pass normalizer with the oracle's markup tags. A row in
-//!   `tests/prepass/golden.jsonl` must give its listed output (each is a reviewed verdict, a group verdict, or pinned
+//!   `tests/prepass/golden.jsonl.zst` must give its listed output (each is a reviewed verdict, a group verdict, or pinned
 //!   while unreviewed: the `status` field); every other row must give exactly what the normalizer gives without the
 //!   pre-pass (the oracle's output or a listed tie, which `golden.rs` checks).
 //! - `cases`: the workbench cases (`tests/prepass/cases.jsonl`: chat and markdown text from the dogfood reports, the
@@ -47,9 +47,20 @@ fn limit() -> usize {
     std::env::var("GOLDEN_LIMIT").ok().and_then(|s| s.parse().ok()).unwrap_or(20)
 }
 
+/// `tests/prepass/<name>`, one JSON object per line; a `.zst` file is decompressed first.
 fn jsonl<T: for<'de> Deserialize<'de>>(name: &str) -> Vec<T> {
     let path = common::tests_dir().join("prepass").join(name);
-    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let src = if name.ends_with(".zst") {
+        use std::io::Read;
+        let file = std::fs::File::open(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let mut decoder = ruzstd::decoding::StreamingDecoder::new(std::io::BufReader::new(file))
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let mut text = String::new();
+        decoder.read_to_string(&mut text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        text
+    } else {
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    };
     src.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
@@ -57,12 +68,12 @@ fn jsonl<T: for<'de> Deserialize<'de>>(name: &str) -> Vec<T> {
 fn golden() {
     let only = std::env::var("PREPASS_LANG").ok();
     let mut expected: HashMap<(String, String), Expected> = HashMap::new();
-    for e in jsonl::<Expected>("golden.jsonl") {
+    for e in jsonl::<Expected>("golden.jsonl.zst") {
         assert!(STATUSES.contains(&e.status.as_str()), "status {:?} of {:?}", e.status, e.text);
         expected.insert((e.lang.clone(), e.text.clone()), e);
     }
-    let plain = Normalizer::with_markup_tags(ORACLE_MARKUP_TAGS);
-    let pre = Normalizer::with_markup_tags(ORACLE_MARKUP_TAGS).with_prepass(true);
+    let plain = Normalizer::with_markup_tags(ORACLE_MARKUP_TAGS).with_prepass(false);
+    let pre = Normalizer::with_markup_tags(ORACLE_MARKUP_TAGS);
     let (mut total_bad, mut listed_seen) = (0usize, 0usize);
     for lang in zyphra_textnorm::LANGUAGES {
         if only.as_deref().is_some_and(|o| o != lang) || !zyphra_textnorm::supported(lang) {
@@ -91,9 +102,9 @@ fn golden() {
         total_bad += bad;
         listed_seen += listed;
     }
-    assert_eq!(total_bad, 0, "pre-pass outputs differ from tests/prepass/golden.jsonl or change an unlisted row");
+    assert_eq!(total_bad, 0, "pre-pass outputs differ from tests/prepass/golden.jsonl.zst or change an unlisted row");
     if only.is_none() {
-        assert!(listed_seen >= expected.len(), "tests/prepass/golden.jsonl lists rows that are not in the goldens");
+        assert!(listed_seen >= expected.len(), "tests/prepass/golden.jsonl.zst lists rows that are not in the goldens");
     }
 }
 
@@ -113,14 +124,17 @@ fn cases() {
 }
 
 #[test]
-fn off_by_default() {
+fn on_by_default() {
     let tn = Normalizer::new();
-    assert!(!tn.prepass());
+    assert!(tn.prepass());
+    assert_eq!(tn.normalize("This is **really** important.", "en"), "This is really important.");
+    assert_eq!(zyphra_textnorm::normalize("2 - 7 = -5", "es"), "dos menos siete es igual a menos cinco");
+    let parity = Normalizer::new().with_prepass(false);
+    assert!(!parity.prepass());
     assert_eq!(
-        tn.normalize("This is **really** important.", "en"),
+        parity.normalize("This is **really** important.", "en"),
         "This is asterisk asterisk really asterisk asterisk important."
     );
-    assert!(Normalizer::new().with_prepass(true).prepass());
 }
 
 #[test]

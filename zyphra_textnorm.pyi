@@ -10,11 +10,11 @@ __version__: str
 class Normalizer:
     """A text normalizer: the markup it keeps as typed and its memo of the last 1024 results. Thread-safe."""
 
-    def __init__(self, markup_tags: Iterable[str] = (), prepass: bool = False) -> None:
+    def __init__(self, markup_tags: Iterable[str] = (), prepass: bool = True) -> None:
         """``markup_tags``: tag names whose markup stays as typed: point tags (``<laugh/>``, ``<laugh>``) and span tags
-        (``<shouting>...</shouting>``). ``prepass``: run the opt-in pre-pass first (markdown, HTML, emoji, look-alike
-        characters and English readings rewritten before the grammars; see ``prepass``). Off, every output is the
-        NeMo-parity output."""
+        (``<shouting>...</shouting>``). ``prepass``: run the pre-pass first (markdown, HTML, emoji, look-alike characters,
+        and each language's readings of numbers, dates, money, phone numbers, addresses and equations rewritten before
+        the grammars; see ``prepass``). ``prepass=False``: every output is the NeMo-parity output."""
 
     @property
     def markup_tags(self) -> list[str]: ...
@@ -35,7 +35,7 @@ PREPASS_RULES: list[str]
 
 def prepass(text: str, language: str, markup_tags: Iterable[str] = ()) -> tuple[str, list[tuple[str, str, str]]]:
     """The pre-pass alone: the rewritten text and each rewrite as ``(rule, before, after)``. The normalizer runs it
-    itself with ``Normalizer(prepass=True)``; this is for inspecting what the rules do."""
+    itself unless ``Normalizer(prepass=False)``; this is for inspecting what the rules do."""
 
 def collapse_line_breaks(text: str) -> str:
     """One plain space for every whitespace run that contains a line break, tab or other non-space whitespace."""

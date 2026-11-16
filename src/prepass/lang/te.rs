@@ -1,0 +1,412 @@
+//! 'te' rules: the port of the workbench's `langrules/te.py` (ids `te.*`).
+
+use fancy_regex::Captures;
+
+#[allow(unused_imports)]
+use super::super::{Ctx, g, matches_at_start, py_int, re_escape, rx, search, tpl};
+#[allow(unused_imports)]
+use super::{LangRule, digit_words, words};
+
+pub(super) const RULES: &[LangRule] = &[
+    ("te.minus", te_minus),
+    ("te.money-abbrev", te_money_abbrev),
+    ("te.money-scale", te_money_scale),
+    ("te.range", te_range),
+    ("te.ordinal-hyphen", te_ordinal_hyphen),
+    ("te.pm-evening", te_pm_evening),
+    ("te.pm-suffix", te_pm_suffix),
+    ("te.suffix", te_suffix),
+    ("te.unit-abbrev", te_unit_abbrev),
+    ("te.half", te_half),
+    ("te.one", te_one),
+    ("te.scale-form", te_scale_form),
+    ("te.doctor", te_doctor),
+];
+
+/// Telugu letters and vowel signs (not the Telugu digits).
+const TE: &str = "\u{0C00}-\u{0C63}";
+/// 1947, 1,500, 5,00,00,000 (10+ bare digits: a phone number).
+const NUM: &str = r"[0-9]{1,3}(?:,[0-9]{2,3})*,[0-9]{3}|[0-9]{1,9}";
+/// Postpositions and case endings written glued to a number (1947లో, 2024న, 100కి, 1990లలో).
+const TAILS: &[&str] = &[
+    "లోనే",
+    "లోని",
+    "లోనూ",
+    "లోపు",
+    "లోగా",
+    "లో",
+    "నుంచే",
+    "నుంచి",
+    "నుండి",
+    "నాటికే",
+    "నాటికి",
+    "నాటి",
+    "నాడు",
+    "న",
+    "కైనా",
+    "కి",
+    "కు",
+    "కే",
+    "లలోని",
+    "లలో",
+    "లకు",
+    "లకి",
+    "ల",
+    "తోనే",
+    "తో",
+    "వరకూ",
+    "వరకు",
+    "దాకా",
+    "కల్లా",
+    "గా",
+];
+/// Scale words: the plural said alone (ఐదు కోట్లు) and the oblique before a noun (ఐదు కోట్ల మంది).
+const SCALES: &[(&str, &str)] = &[("వందలు", "వందల"), ("వేలు", "వేల"), ("లక్షలు", "లక్షల"), ("కోట్లు", "కోట్ల")];
+const PERIODS: &[&str] = &["ఉదయం", "మధ్యాహ్నం", "సాయంత్రం", "రాత్రి", "తెల్లవారుజామున"];
+/// Telugu unit abbreviations: (written, one, plural said alone, plural before the noun it measures).
+const UNITS: &[(&str, &str, &str, &str)] = &[
+    ("కి.గ్రా.", "కిలోగ్రాము", "కిలోగ్రాములు", "కిలోగ్రాముల"),
+    ("మి.గ్రా.", "మిల్లీగ్రాము", "మిల్లీగ్రాములు", "మిల్లీగ్రాముల"),
+    ("గ్రా.", "గ్రాము", "గ్రాములు", "గ్రాముల"),
+    ("మి.లీ.", "మిల్లీలీటరు", "మిల్లీలీటర్లు", "మిల్లీలీటర్ల"),
+    ("లీ.", "లీటరు", "లీటర్లు", "లీటర్ల"),
+    ("కి.మీ.", "కిలోమీటరు", "కిలోమీటర్లు", "కిలోమీటర్ల"),
+    ("మీ.", "మీటరు", "మీటర్లు", "మీటర్ల"),
+];
+/// Latin unit symbols: the oblique plural before the noun they measure (the grammar's plural stays elsewhere).
+const LATIN_UNITS: &[(&str, &str)] = &[
+    ("kg", "కిలోగ్రాముల"),
+    ("mg", "మిల్లీగ్రాముల"),
+    ("g", "గ్రాముల"),
+    ("ml", "మిల్లీలీటర్ల"),
+    ("km", "కిలోమీటర్ల"),
+    ("cm", "సెంటీమీటర్ల"),
+    ("mm", "మిల్లీమీటర్ల"),
+];
+/// Units and time words “half” stands before as అర (అర కిలో, అర గంట).
+const HALF_NOUNS: &[&str] = &[
+    "కిలో",
+    "లీటరు",
+    "లీటర్",
+    "గంట",
+    "రోజు",
+    "కప్పు",
+    "గ్లాసు",
+    "చెంచా",
+    "స్పూన్",
+    "మీటరు",
+    "మీటర్",
+    "అడుగు",
+    "డజను",
+    "ఎకరం",
+    "ఎకరా",
+    "గ్రాము",
+    "నిమిషం",
+    "శాతం",
+];
+/// Nouns and units a count of one stands before (prefixes: రోజు matches రోజులో, గంట matches గంటకు).
+const ONE_NOUNS: &[&str] = &[
+    "కిలో",
+    "గ్రాము",
+    "లీటరు",
+    "లీటర్",
+    "మీటరు",
+    "మీటర్",
+    "కిలోమీటర్",
+    "సెంటీమీటర్",
+    "అడుగు",
+    "అంగుళ",
+    "టన్ను",
+    "ఎకరా",
+    "ఎకరం",
+    "డిగ్రీ",
+    "శాతం",
+    "రోజు",
+    "గంట",
+    "నిమిషం",
+    "నిమిష",
+    "సెకను",
+    "వారం",
+    "వారా",
+    "నెల",
+    "సంవత్సర",
+    "ఏడాది",
+    "శతాబ్ద",
+    "మనిషి",
+    "వ్యక్తి",
+    "సారి",
+    "కప్పు",
+    "గ్లాసు",
+    "చెంచా",
+    "స్పూన్",
+    "ముక్క",
+    "ప్యాకెట్",
+    "బాటిల్",
+    "సీసా",
+    "పేజీ",
+    "పాయింట్",
+    "గోల్",
+    "పరుగు",
+    "వికెట్",
+    "పతక",
+    "లక్ష",
+    "కోటి",
+    "రూపాయి",
+    "డాలర్",
+    "బిడ్డ",
+    "కొడుకు",
+    "కూతురు",
+    "ఇల్లు",
+    "కారు",
+    "పుస్తక",
+    "ఇంచు",
+    "చోట",
+    "భాగం",
+];
+/// A currency code or sign and a space before the number: the grammar's money reading stays.
+const NOT_MONEY: &str = r"(?<!Rs )(?<!Rs\. )(?<!INR )(?<!USD )(?<!EUR )(?<!GBP )(?<![₹$¥€£] )";
+/// Words after a number that make it stand alone (the plural form: ఐదు కోట్లు దాటింది).
+const VERBS: &[&str] = &[
+    "దాటి",
+    "దాటా",
+    "దాటు",
+    "ఉంది",
+    "ఉన్నాయి",
+    "ఉన్నారు",
+    "ఉంటుంది",
+    "ఉంటాయి",
+    "అయింది",
+    "అయ్యింది",
+    "అయ్యాయి",
+    "అవుతుంది",
+    "పెరిగి",
+    "తగ్గి",
+    "చేరి",
+    "చేరు",
+    "మాత్రమే",
+];
+/// Noun endings: plurals and their oblique (పుస్తకాలు, కిలోమీటర్ల, రోజుల్లో).
+const NOUN_END: &str = r"(?:లు|ల|ల్లో|లలో|లకు|లకి|లతో|లను|ల్ని)";
+const SCALE_NOUNS: &[&str] =
+    &["మంది", "కిలో", "గ్రాము", "లీటరు", "లీటర్", "మీటరు", "మీటర్", "కిలోమీటర్", "ఎకరా", "రూపాయ", "డాలర్", "ఓట్ల", "ఓట్లు", "సంవత్సర", "ఏళ్ల"];
+
+/// `"|".join(sorted(keys, key=len, reverse=True))`: longest first, ties in table order.
+fn longest_first(keys: &[&str]) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.join("|")
+}
+
+fn end0(m: &Captures<'_, str>) -> usize {
+    m.get(0).map_or(0, |x| x.end())
+}
+
+/// The Telugu word right after `rest`'s leading space (`re.match(r" ([TE]+)", rest)`).
+fn next_word(rest: &str) -> Option<String> {
+    rx(&format!(r"^ ([{TE}]+)")).captures(rest).ok().flatten().map(|c| g(&c, 1).to_string())
+}
+
+/// A written number as the grammar reads it, or None for a leading zero (codes are not numbers).
+fn plain(n: &str) -> Option<String> {
+    let d = n.replace(',', "");
+    let b = d.as_bytes();
+    if b.len() > 1 && b[0] == b'0' && b[1] != b'.' {
+        return None;
+    }
+    Some(words(&d, "te"))
+}
+
+/// A year 1100–1999 as Telugu says it, in hundreds: 1947 -> “పంతొమ్మిది వందల నలభై ఏడు” (the grammar's “వెయ్యి
+/// తొమ్మిది వందల …” is the counting form); any other number as the grammar reads it.
+fn year(n: &str) -> Option<String> {
+    let d = n.replace(',', "");
+    let b = d.as_bytes();
+    if b.len() == 4 && !d.contains('.') && b[0] == b'1' && b[1] != b'0' {
+        let rest = d[2..].trim_start_matches('0');
+        let tail = if rest.is_empty() {
+            " వందలు".to_string()
+        } else {
+            format!(" వందల {}", words(rest, "te"))
+        };
+        return Some(format!("{}{tail}", words(&d[..2], "te")));
+    }
+    plain(n)
+}
+
+/// The suffix glued to the last word; a plural scale word takes its oblique first (ఐదు వందలు + లో -> ఐదు వందలలో).
+fn inflect(spoken: &str, tail: &str) -> String {
+    let mut ws: Vec<String> = spoken.split_whitespace().map(str::to_string).collect();
+    let n = ws.len();
+    let mut last = ws[n - 1].clone();
+    for &(pl, obl) in SCALES.iter().chain(&[("గంటలు", "గంటల")]) {
+        if last == pl {
+            last = obl.to_string();
+        }
+    }
+    ws[n - 1] = format!("{last}{tail}");
+    ws.join(" ")
+}
+
+fn te_minus(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,)\]{TE}-])(?<![0-9] )-(?=[0-9])")), &t, "మైనస్ ")
+}
+
+fn te_money_abbrev(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<![{TE}\w])రూ\.? ?(?=[0-9])")), &t, "₹");
+    c.sub_tpl(&rx(&format!(r"(₹ ?(?:{NUM})(?:\.[0-9]{{1,2}})?)/-")), &t, r"\1")
+}
+
+fn te_money_scale(t: String, c: &mut Ctx) -> String {
+    const FORMS: &[(&str, &str, &[&str])] = &[
+        ("కోటి", "కోట్ల", &["కోటి", "కోట్లు", "కోట్ల"]),
+        ("లక్ష", "లక్షల", &["లక్ష", "లక్షలు", "లక్షల"]),
+        ("వెయ్యి", "వేల", &["వెయ్యి", "వేలు", "వేల"]),
+    ];
+    let pat = format!(
+        r"(?:₹|(?<![\w.])Rs\.?|(?<!\w)INR) ?((?:{NUM})(?:\.[0-9]+)?) ?(కోట్లు|కోట్ల|కోటి|లక్షలు|లక్షల|లక్ష|వెయ్యి|వేలు|వేల)(?![{TE}\w])"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        let (n, s) = (g(m, 1), g(m, 2));
+        let one = n == "1";
+        for &(sing, obl, forms) in FORMS {
+            if forms.contains(&s) {
+                return Some(format!("{n} {} రూపాయలు", if one { sing } else { obl }));
+            }
+        }
+        None
+    })
+}
+
+fn te_range(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"(?<![\w.,:/+-])([0-9]{{1,9}})-([0-9]{{1,9}})(?![\w,:/]|[.-][0-9])(?= [{TE}]|[.!?,;:)]?(?:\n|$)|[.!?,;:)] )"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        let (a, b) = (g(m, 1), g(m, 2));
+        if (a.len() > 1 && a.starts_with('0')) || (b.len() > 1 && b.starts_with('0')) || py_int(a) >= py_int(b) {
+            return None;
+        }
+        Some(format!("{a} నుంచి {b}"))
+    })
+}
+
+fn te_ordinal_hyphen(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,:/-])([0-9]+)-(?=వ(?:ది|దే)?(?![{TE}]))")), &t, r"\1")
+}
+
+fn te_pm_evening(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"(?:([{TE}]+) )?(?<![\w.,:/])(0?[1-9]|1[0-2])(?::([0-5][0-9]))? ?(pm|PM|p\.m\.|P\.M\.|am|AM|a\.m\.|A\.M\.)(?!\w)"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        let h = py_int(g(m, 2)).to_string();
+        let hm = if g(m, 3).is_empty() { format!("{h} గంటలు") } else { format!("{h}:{}", g(m, 3)) };
+        if PERIODS.contains(&g(m, 1)) {
+            return Some(format!("{} {hm}", g(m, 1)));
+        }
+        if !matches!(py_int(&h), 4 | 5) {
+            return None;
+        }
+        let word = if g(m, 4).starts_with(['p', 'P']) { "సాయంత్రం" } else { "ఉదయం" };
+        let before = if g(m, 1).is_empty() { String::new() } else { format!("{} ", g(m, 1)) };
+        Some(format!("{before}{word} {hm}"))
+    })
+}
+
+fn te_pm_suffix(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"(?<=[0-9]) ?(pm|PM|am|AM)(?=[{TE}])")), &t, |m| {
+        Some(format!(" {}", if matches!(g(m, 1), "pm" | "PM") { "పీఎం" } else { "ఏఎం" }))
+    })
+}
+
+fn te_suffix(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"(?<![\w.,:/–-])(?:([0-9]{{1,2}}):([0-5][0-9])|((?:{NUM})(?:\.[0-9]+)?))-?({})(?![{TE}])",
+        TAILS.join("|")
+    );
+    let src = t.clone();
+    let after = format!(r" [{TE}]");
+    c.sub(&rx(&pat), &t, |m| {
+        let tail = g(m, 4);
+        if tail == "ల" && !matches_at_start(&after, &src[end0(m)..]) {
+            return None;
+        }
+        if m.get(1).is_some() {
+            let (h, mm) = (g(m, 1), g(m, 2));
+            if py_int(h) > 23 || (mm.starts_with('0') && mm != "00") {
+                return None;
+            }
+            let hw = words(&py_int(h).to_string(), "te");
+            if mm == "00" {
+                return Some(format!("{hw} {}", inflect("గంటలు", tail)));
+            }
+            return Some(format!("{hw} {}", inflect(&words(mm, "te"), tail)));
+        }
+        Some(inflect(&year(g(m, 3))?, tail))
+    })
+}
+
+fn te_unit_abbrev(t: String, c: &mut Ctx) -> String {
+    let abbr: Vec<String> =
+        UNITS.iter().map(|u| re_escape(u.0)).chain(LATIN_UNITS.iter().map(|u| u.0.to_string())).collect();
+    let pat = format!(r"(?<![\w.,:/-])((?:{NUM})(?:\.[0-9]+)?) ({})(?![{TE}\w])", abbr.join("|"));
+    let src = t.clone();
+    c.sub(&rx(&pat), &t, |m| {
+        let (n, ab) = (g(m, 1), g(m, 2));
+        let rest = &src[end0(m)..];
+        let noun = next_word(rest).is_some_and(|w| !VERBS.iter().any(|v| w.starts_with(v)));
+        for &(a, obl) in LATIN_UNITS {
+            if a == ab {
+                return if noun && n != "1" { Some(format!("{n} {obl}")) } else { None };
+            }
+        }
+        for &(a, one, pl, obl) in UNITS {
+            if a == ab {
+                let end = if rest.is_empty() || rest.starts_with('\n') { "." } else { "" };
+                if n == "1" {
+                    return Some(format!("{n} {one}{end}"));
+                }
+                return Some(format!("{n} {}{end}", if noun { obl } else { pl }));
+            }
+        }
+        None
+    })
+}
+
+fn te_half(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,:/-])(?<![0-9] )(?:½|1/2) ?(?=(?:{}))", longest_first(HALF_NOUNS));
+    c.sub_tpl(&rx(&pat), &t, "అర ")
+}
+
+fn te_one(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,:/₹$-])1(?= (?:{}))", longest_first(ONE_NOUNS));
+    c.sub_tpl(&rx(&pat), &t, "ఒక")
+}
+
+fn te_scale_form(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,:/₹$¥€£+-]){NOT_MONEY}({NUM})(?= [{TE}]|[.!?,;:]?(?:\n|$)|[.!?,;:] )");
+    let noun_end = format!("{NOUN_END}$");
+    let src = t.clone();
+    c.sub(&rx(&pat), &t, |m| {
+        let sp = plain(g(m, 1))?;
+        let mut ws: Vec<String> = sp.split_whitespace().map(str::to_string).collect();
+        let nxt = next_word(&src[end0(m)..]);
+        let alone = nxt.as_ref().is_none_or(|w| VERBS.iter().any(|v| w.starts_with(v)));
+        let noun = !alone
+            && nxt.as_ref().is_some_and(|w| SCALE_NOUNS.iter().any(|v| w.starts_with(v)) || search(&noun_end, w));
+        let n = ws.len();
+        for &(pl, obl) in SCALES {
+            if alone && ws[n - 1] == obl {
+                ws[n - 1] = pl.to_string();
+            } else if noun && ws[n - 1] == pl {
+                ws[n - 1] = obl.to_string();
+            }
+        }
+        let out = ws.join(" ");
+        if out == sp { None } else { Some(out) }
+    })
+}
+
+fn te_doctor(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(&format!(r"(?<!\w)Dr\.? (?=[{TE}])")), &t, "డాక్టర్ ")
+}

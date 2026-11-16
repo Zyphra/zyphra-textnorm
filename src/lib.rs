@@ -67,8 +67,17 @@ pub fn collapse_line_breaks(text: &str) -> String {
 
 static DEFAULT: LazyLock<Normalizer> = LazyLock::new(Normalizer::new);
 
-/// The spoken form of `text` in `language`, by a shared [`Normalizer::new`] (no markup tags; memoized). See
-/// [`Normalizer::normalize`].
+/// The spoken form of `text` in `language`, by a shared [`Normalizer::new`] (no markup tags, the pre-pass on when the
+/// build has it; memoized). See [`Normalizer::normalize`].
 pub fn normalize(text: &str, language: &str) -> String {
     DEFAULT.normalize(text, language)
+}
+
+#[cfg(feature = "prepass")]
+static PLAIN: LazyLock<Normalizer> = LazyLock::new(|| Normalizer::new().with_prepass(false));
+
+/// The grammars' own reading, without the pre-pass: what the pre-pass's rules start from.
+#[cfg(feature = "prepass")]
+pub(crate) fn normalize_plain(text: &str, language: &str) -> String {
+    PLAIN.normalize(text, language)
 }

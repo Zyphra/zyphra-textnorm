@@ -85,8 +85,63 @@ pub(super) fn md_table(t: T, c: &mut Ctx) -> T {
     out.join("\n")
 }
 
+/// The word for # in each language: the grammar's own where its data has one (electronic/symbol tables), else ours.
+const HASH_WORD: [(&str, &str); 43] = [
+    ("en", "hash"),
+    ("de", "Raute"),
+    ("es", "almohadilla"),
+    ("fr", "dièse"),
+    ("it", "cancelletto"),
+    ("pt", "cerquilha"),
+    ("ja", "ハッシュタグ"),
+    ("zh", "井号"),
+    ("ko", "샵"),
+    ("nl", "hekje"),
+    ("pl", "kratka"),
+    ("tr", "diyez"),
+    ("uk", "решітка"),
+    ("cs", "mřížka"),
+    ("da", "havelåge"),
+    ("fi", "risuaita"),
+    ("el", "δίεση"),
+    ("nb", "firkant"),
+    ("ro", "diez"),
+    ("sk", "mriežka"),
+    ("bg", "диез"),
+    ("he", "סולמית"),
+    ("th", "แฮช"),
+    ("tl", "hash"),
+    ("ms", "pagar"),
+    ("ka", "ჰეშთეგი"),
+    ("ta", "ஹேஷ்"),
+    ("gu", "હેશ"),
+    ("kn", "ಹ್ಯಾಶ್"),
+    ("ml", "ഹാഷ്"),
+    ("pa", "ਹੈਸ਼"),
+    ("or", "ହ୍ୟାସ୍"),
+    ("ru", "решетка"),
+    ("sv", "brädgård"),
+    ("hu", "kettőskereszt"),
+    ("ar", "هاش"),
+    ("vi", "thăng"),
+    ("id", "pagar"),
+    ("hi", "हैशटैग"),
+    ("bn", "হ্যাশ"),
+    ("te", "హ్యాష్"),
+    ("mr", "हॅशटॅग"),
+    ("ur", "ہیش ٹیگ"),
+];
+
 pub(super) fn md_heading(t: T, c: &mut Ctx) -> T {
-    c.sub(&rx(r"(?m)^[ \t]{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"), &t, |m| Some(end_sentence(g(m, 1))))
+    let hash = lookup(&HASH_WORD, c.lang()).unwrap_or("hash");
+    c.sub(&rx(r"(?m)^[ \t]{0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"), &t, |m| {
+        let text = g(m, 2);
+        // “# Additional currencies are listed below.”: a comment line, not a heading
+        if g(m, 1) == "#" && search(r"[^\W\d_]\.[\d.]*$", text) {
+            return Some(format!("{hash} {text}"));
+        }
+        Some(end_sentence(text))
+    })
 }
 
 pub(super) fn md_quote(t: T, c: &mut Ctx) -> T {
@@ -263,40 +318,41 @@ pub(super) fn md_code_scope(t: T, c: &mut Ctx) -> T {
     c.sub_tpl(&rx(r"(?<=\w)::(?=\w)"), &t, " ")
 }
 
+/// ja and zh: an emoji's name joins the sentence without spaces (a space stops the Japanese grammar reading 3日).
+fn emoji_pad(lang: &str) -> &'static str {
+    if matches!(lang, "ja" | "zh") { "" } else { " " }
+}
+
 pub(super) fn md_shortcode(t: T, c: &mut Ctx) -> T {
-    let en = c.lang() == "en";
+    let lang = c.lang().to_string();
+    let pad = emoji_pad(&lang);
     c.sub(&rx(r"(?<![\w:]):(?:(?=[a-z0-9_+\-]*[a-z])[a-z0-9_+\-]{2,30}|[+-]1):(?![\w:])"), &t, |m| {
-        if !en {
-            return Some(String::new());
-        }
-        let name = emoji_alias(&m[0]).and_then(|e| emoji_name(&e));
-        Some(name.map_or(String::new(), |n| format!(" {n} ")))
+        let name = emoji_alias(&m[0]).and_then(|e| emoji_name(&e, &lang));
+        Some(name.map_or(String::new(), |n| format!("{pad}{n}{pad}")))
     })
 }
 
 pub(super) fn ch_emoji(t: T, c: &mut Ctx) -> T {
-    if c.lang() != "en" {
-        let re = rx(concat!(
-            r"(?:[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F1E6}-\x{1F1FF}]",
-            r"[\x{FE0E}\x{FE0F}\x{1F3FB}-\x{1F3FF}]*(?:\x{200D}[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}][\x{FE0F}]?)*)+",
-            r"|(?<=\d)\x{FE0F}?\x{20E3}"
-        ));
-        return c.sub_tpl(&re, &t, "");
-    }
-    let t = c.sub(&rx(r"[★☆]{3,}"), &t, |m| {
-        let full = m[0].matches('★').count();
-        let empty = m[0].matches('☆').count();
-        Some(format!(" {full} out of {} stars ", full + empty))
-    });
+    let lang = c.lang().to_string();
+    let pad = emoji_pad(&lang);
+    let t = if lang == "en" {
+        c.sub(&rx(r"[★☆]{3,}"), &t, |m| {
+            let full = m[0].matches('★').count();
+            let empty = m[0].matches('☆').count();
+            Some(format!(" {full} out of {} stars ", full + empty))
+        })
+    } else {
+        t
+    };
     let mut out = String::new();
     let mut pos = 0usize;
     let mut last: Option<String> = None;
     for (start, end, e) in emoji_list(&t) {
-        let Some(name) = emoji_name(&e) else { continue };
+        let Some(name) = emoji_name(&e, &lang) else { continue };
         let gap = &t[pos..start];
         out.push_str(gap);
         if !(last.as_deref() == Some(name.as_str()) && py_strip(gap).is_empty()) {
-            out.push_str(&format!(" {name} "));
+            out.push_str(&format!("{pad}{name}{pad}"));
             c.hits.push(super::Hit { rule: c.rid, before: e.clone(), after: name.clone() });
         }
         last = Some(name);
@@ -317,8 +373,32 @@ static HASH_KEEP: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         .collect()
 });
 
+/// VidaSana → Vida Sana, MutluYıllar → Mutlu Yıllar, AIForGood → AI For Good; iPhone, eBay stay whole: prototype
+/// `camel_split`.
+fn camel_split(w: &str) -> String {
+    let c: Vec<char> = w.chars().collect();
+    let mut out = String::new();
+    for (i, &ch) in c.iter().enumerate() {
+        if i > 0 && ch.is_uppercase() {
+            let prev = c[i - 1];
+            let mut j = i - 1;
+            while j > 0 && (if prev.is_lowercase() { c[j - 1].is_lowercase() } else { c[j - 1].is_uppercase() }) {
+                j -= 1;
+            }
+            let run = i - j; // the letters of prev's case right before ch
+            if run >= 2 && (prev.is_lowercase() || (prev.is_uppercase() && i + 1 < c.len() && c[i + 1].is_lowercase()))
+            {
+                out.push(' ');
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
 pub(super) fn md_hashtag(t: T, c: &mut Ctx) -> T {
-    let t = if c.lang() == "en" {
+    let en = c.lang() == "en";
+    let t = if en {
         c.sub(&rx(r"(?<![\w#&])#(\d+)([A-Za-z]\w*)(?![\w#])"), &t, |m| {
             let (mut num, mut rest) = (g(m, 1).to_string(), g(m, 2));
             if ["st", "nd", "rd", "th"].contains(&rest) {
@@ -335,6 +415,12 @@ pub(super) fn md_hashtag(t: T, c: &mut Ctx) -> T {
     } else {
         t
     };
+    // Weibo / Douyin topic: #双十一# 今天… → 双十一 今天…
+    let t = if matches!(c.lang(), "zh" | "ja") {
+        c.sub_tpl(&rx(r"(?<![\w#&])#(?=[^#\n]*[^\x00-\x7f])([^\s#](?:[^#\n]{0,40}?[^\s#])?)#(?!#)"), &t, r"\1")
+    } else {
+        t
+    };
     c.sub(&rx(r"(?<![\w#&])#([^\W\d_]\w*)(?![\w#]|\.\w)"), &t, |m| {
         let w = g(m, 1);
         if HASH_KEEP.contains(w.to_lowercase().as_str()) || full(r"[IVX]+", w) {
@@ -347,7 +433,10 @@ pub(super) fn md_hashtag(t: T, c: &mut Ctx) -> T {
         {
             return None;
         }
-        Some(w.to_string())
+        if en {
+            return Some(w.to_string()); // English keeps “underscore” and the tag whole (Gabriel, Nov 15)
+        }
+        Some(camel_split(&w.split('_').filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")))
     })
 }
 
@@ -378,11 +467,20 @@ pub(super) fn ch_endash_pause(t: T, c: &mut Ctx) -> T {
 }
 
 pub(super) fn ch_ellipsis(t: T, c: &mut Ctx) -> T {
+    let t = c.sub_tpl(&rx(r"…(?=\d)"), &t, "... "); // ...3 read “.. point three”
     c.sub_tpl(&rx("…"), &t, "...")
 }
 
 pub(super) fn ch_invisible(t: T, c: &mut Ctx) -> T {
     c.sub_tpl(&rx(r"[\x{200B}\x{2060}\x{FEFF}\x{AD}]"), &t, "")
+}
+
+/// Spanish: ves glued to a number (829ves, ves817) or VES beside one (261 VES) is the bolívar soberano. The grammar's
+/// currency table spells the code “ves” plus a zero-width space (a NeMo data typo), so that is the key written back.
+pub(super) fn es_ves(t: T, c: &mut Ctx) -> T {
+    let key = "ves\u{200B}";
+    let t = c.sub_tpl(&rx(r"(?<=\d)(?:ves|VES)(?!\w)|(?<!\w)(?:ves|VES)(?=\d)"), &t, key);
+    c.sub_tpl(&rx(r"(?<=\d[ \t\x{A0}])VES(?!\w)|(?<!\w)VES(?=[ \t\x{A0}]\d)"), &t, key)
 }
 
 fn shift(s: &str) -> String {
@@ -404,9 +502,8 @@ pub(super) fn ch_ligature(t: T, c: &mut Ctx) -> T {
 }
 
 pub(super) fn ch_lookalike(t: T, c: &mut Ctx) -> T {
-    const MAP: [(&str, &str); 9] = [
+    const MAP: [(&str, &str); 8] = [
         ("\u{b5}", "\u{3bc}"),
-        ("\u{2126}", "\u{3a9}"),
         ("\u{212a}", "K"),
         ("\u{212b}", "\u{c5}"),
         ("\u{3d5}", "\u{3c6}"),
@@ -417,12 +514,242 @@ pub(super) fn ch_lookalike(t: T, c: &mut Ctx) -> T {
     ];
     // it, pl, de and the Indic grammars read the micro sign µ, not Greek μ
     let class = if c.lang() == "en" {
-        r"[\x{B5}\x{2126}\x{212A}\x{212B}\x{3D5}\x{3D1}\x{3F5}\x{3F1}\x{3D6}]"
+        r"[\x{B5}\x{212A}\x{212B}\x{3D5}\x{3D1}\x{3F5}\x{3F1}\x{3D6}]"
     } else {
-        r"[\x{2126}\x{212A}\x{212B}\x{3D5}\x{3D1}\x{3F5}\x{3F1}\x{3D6}]"
+        r"[\x{212A}\x{212B}\x{3D5}\x{3D1}\x{3F5}\x{3F1}\x{3D6}]"
     };
     let t = c.sub(&rx(class), &t, |m| lookup(&MAP, &m[0]).map(str::to_string));
     c.sub_tpl(&rx(r"(?<=\d)\s?˚|˚(?=[CF]\b)"), &t, "°")
+}
+
+#[derive(Clone, Copy)]
+enum Plural {
+    /// one form
+    Inv,
+    /// singular for exactly 1, else plural (en, es, pt, fi, bg, te)
+    One,
+    /// singular below 2 (fr)
+    Fr,
+    /// ro: 1 / 0, 2–19 and decimals / 20+
+    Ro,
+    /// cs, sk: 1 / 2–4 / 5+ / decimals
+    Cs,
+    /// pl: 1 / 2–4, 22–24… / 5+ / decimals
+    Pl,
+    /// ru, uk: 1, 21… / 2–4, 22–24… / 5+ / decimals
+    Ru,
+}
+
+/// The ohm units in a language: its forms (a template whose {} is the prefix), the kilo/mega/giga/milli prefixes, the
+/// plural rule, and the forms once a prefix is attached when they differ (de Ohm → Kiloohm, el ωμ → κιλοώμ). Where a
+/// grammar has the unit, these are its words.
+struct Ohm {
+    forms: &'static [&'static str],
+    pre: [&'static str; 4],
+    plural: Plural,
+    prefixed: Option<&'static [&'static str]>,
+}
+
+const fn ohm(forms: &'static [&'static str], pre: [&'static str; 4], plural: Plural) -> Ohm {
+    Ohm { forms, pre, plural, prefixed: None }
+}
+
+const LATIN: [&str; 4] = ["kilo", "mega", "giga", "milli"];
+const LATIN1: [&str; 4] = ["kilo", "mega", "giga", "mili"];
+
+static OHM: [(&str, Ohm); 43] = {
+    use Plural::*;
+    [
+        ("en", ohm(&["{}ohm", "{}ohms"], ["kil", "meg", "gig", "milli"], One)),
+        (
+            "de",
+            Ohm { forms: &["Ohm"], pre: ["Kilo", "Mega", "Giga", "Milli"], plural: Inv, prefixed: Some(&["{}ohm"]) },
+        ),
+        ("es", ohm(&["{}ohmio", "{}ohmios"], LATIN1, One)),
+        ("fr", ohm(&["{}ohm", "{}ohms"], ["kilo", "méga", "giga", "milli"], Fr)),
+        ("it", ohm(&["{}ohm"], LATIN, Inv)),
+        ("pt", ohm(&["{}ohm", "{}ohms"], ["quilo-", "mega", "giga", "mili"], One)),
+        ("ja", ohm(&["{}オーム"], ["キロ", "メガ", "ギガ", "ミリ"], Inv)),
+        ("zh", ohm(&["{}欧姆"], ["千", "兆", "吉", "毫"], Inv)),
+        ("ko", ohm(&["{}옴"], ["킬로", "메가", "기가", "밀리"], Inv)),
+        ("nl", ohm(&["{}ohm"], LATIN, Inv)),
+        ("pl", ohm(&["{}om", "{}omy", "{}omów", "{}oma"], LATIN1, Pl)),
+        ("tr", ohm(&["{}ohm"], LATIN1, Inv)),
+        ("uk", ohm(&["{}ом", "{}оми", "{}омів", "{}ома"], ["кіло", "мега", "гіга", "мілі"], Ru)),
+        ("cs", ohm(&["{}ohm", "{}ohmy", "{}ohmů", "{}ohmu"], LATIN1, Cs)),
+        ("da", ohm(&["{}ohm"], LATIN, Inv)),
+        ("fi", ohm(&["{}ohmi", "{}ohmia"], ["kilo-", "mega", "giga", "milli"], One)),
+        (
+            "el",
+            Ohm {
+                forms: &["ωμ"], pre: ["κιλο", "μεγα", "γιγα", "μιλι"], plural: Inv, prefixed: Some(&["{}ώμ"])
+            },
+        ),
+        ("nb", ohm(&["{}ohm"], LATIN, Inv)),
+        ("ro", ohm(&["{}ohm", "{}ohmi", "de {}ohmi"], LATIN1, Ro)),
+        ("sk", ohm(&["{}ohm", "{}ohmy", "{}ohmov", "{}ohmu"], LATIN1, Cs)),
+        ("bg", ohm(&["{}ом", "{}ома"], ["кило", "мега", "гига", "мили"], One)),
+        ("he", ohm(&["{}אוהם"], ["קילו-", "מגה-", "גיגה-", "מילי-"], Inv)),
+        ("th", ohm(&["{}โอห์ม"], ["กิโล", "เมกะ", "จิกะ", "มิลลิ"], Inv)),
+        ("tl", ohm(&["{}ohm"], LATIN1, Inv)),
+        ("ms", ohm(&["{}ohm"], LATIN1, Inv)),
+        ("ka", ohm(&["{}ომი"], ["კილო", "მეგა", "გიგა", "მილი"], Inv)),
+        ("ta", ohm(&["{}ஓம்"], ["கிலோ ", "மெகா ", "ஜிகா ", "மில்லி "], Inv)),
+        ("gu", ohm(&["{}ઓહ્મ"], ["કિલો", "મેગા", "ગીગા", "મિલી"], Inv)),
+        ("kn", ohm(&["{}ಓಮ್"], ["ಕಿಲೋ ", "ಮೆಗಾ ", "ಗಿಗಾ ", "ಮಿಲಿ "], Inv)),
+        ("ml", ohm(&["{}ഓം"], ["കിലോ ", "മെഗാ ", "ഗിഗാ ", "മില്ലി "], Inv)),
+        ("pa", ohm(&["{}ਓਹਮ"], ["ਕਿਲੋ", "ਮੈਗਾ", "ਗੀਗਾ", "ਮਿਲੀ"], Inv)),
+        ("or", ohm(&["{}ଓହମ୍"], ["କିଲୋ", "ମେଗା", "ଗିଗା", "ମିଲି"], Inv)),
+        ("ru", ohm(&["{}ом", "{}ома", "{}ом", "{}ома"], ["кило", "мега", "гига", "милли"], Ru)),
+        ("sv", ohm(&["{}ohm"], LATIN, Inv)),
+        ("hu", ohm(&["{}ohm"], LATIN, Inv)),
+        ("ar", ohm(&["{}أوم"], ["كيلو ", "ميغا ", "غيغا ", "ملي "], Inv)),
+        ("vi", ohm(&["{}ôm"], ["ki lô ", "mê ga ", "gi ga ", "mi li "], Inv)),
+        ("id", ohm(&["{}ohm"], LATIN1, Inv)),
+        ("hi", ohm(&["{}ओम"], ["किलो", "मेगा", "गीगा", "मिली"], Inv)),
+        ("bn", ohm(&["{}ওহম"], ["কিলো", "মেগা", "গিগা", "মিলি"], Inv)),
+        ("te", ohm(&["{}ఓమ్", "{}ఓమ్స్"], ["కిలో ", "మెగా ", "గిగా ", "మిల్లీ "], One)),
+        ("mr", ohm(&["{}ओहम"], ["किलो", "मेगा", "गिगा", "मिली"], Inv)),
+        ("ur", ohm(&["{}اوہم"], ["کلو ", "میگا ", "گیگا ", "ملی "], Inv)),
+    ]
+};
+
+/// The ohm units each grammar already reads after a number (5 Ω, 1 kΩ; checked 2026-11-15): left to the grammar, with
+/// the Greek Ω its data uses. English Ω/kΩ/MΩ are the units rule's (5 Ω → five ohms).
+const OHM_READ: [(&str, &str); 35] = [
+    ("en", "Ω kΩ MΩ"),
+    ("nl", "Ω"),
+    ("pl", "Ω kΩ MΩ"),
+    ("tr", "Ω"),
+    ("uk", "Ω"),
+    ("cs", "Ω"),
+    ("da", "Ω"),
+    ("fi", "Ω"),
+    ("el", "Ω"),
+    ("nb", "Ω"),
+    ("ro", "Ω"),
+    ("sk", "Ω"),
+    ("bg", "Ω"),
+    ("he", "Ω"),
+    ("th", "Ω"),
+    ("tl", "Ω kΩ MΩ"),
+    ("ms", "Ω kΩ MΩ"),
+    ("ka", "Ω kΩ MΩ"),
+    ("ta", "Ω kΩ MΩ"),
+    ("gu", "Ω kΩ MΩ"),
+    ("kn", "Ω kΩ MΩ"),
+    ("ml", "Ω"),
+    ("pa", "Ω kΩ MΩ"),
+    ("or", "Ω"),
+    ("ru", "Ω"),
+    ("sv", "Ω"),
+    ("hu", "Ω kΩ MΩ"),
+    ("ar", "Ω kΩ MΩ mΩ"),
+    ("vi", "Ω kΩ MΩ GΩ mΩ"),
+    ("id", "Ω kΩ MΩ"),
+    ("hi", "Ω kΩ MΩ GΩ mΩ"),
+    ("bn", "Ω kΩ MΩ"),
+    ("te", "Ω kΩ MΩ"),
+    ("mr", "Ω kΩ MΩ"),
+    ("ur", "Ω kΩ MΩ"),
+];
+
+/// ... and before a number (Arabic reads “kΩ 123” as 123 kiloohm); the flag says whether that works before 1.
+const OHM_READ_BEFORE: [(&str, &str, bool); 2] = [("ar", "Ω kΩ MΩ mΩ", false), ("ru", "Ω", true)];
+
+/// Which form a count takes: 0 is the singular (also the form said with no number).
+fn ohm_form(plural: Plural, num: Option<&str>) -> usize {
+    let Some(num) = num else { return 0 };
+    if matches!(plural, Plural::Inv) {
+        return 0;
+    }
+    // 1.000 / 7,030,927 are grouped; 2,5 / 1.5 are decimals
+    let (n, m100, frac) = match rx(r"^(\d+(?:[.,]\d{3})*)(?:[.,](\d+))?$").captures(num).ok().flatten() {
+        Some(m) => {
+            let digits = super::py_int_str(&m[1]);
+            let tail = &digits[digits.len().saturating_sub(2)..];
+            (py_int(&m[1]), tail.parse::<u32>().unwrap_or(0), m.get(2).is_some())
+        }
+        None => (0, 0, true),
+    };
+    let (one, m10) = (n == 1, m100 % 10);
+    match plural {
+        Plural::Inv => 0,
+        Plural::One => usize::from(!one || frac),
+        Plural::Fr => usize::from(n >= 2),
+        Plural::Ro if one && !frac => 0,
+        Plural::Ro => {
+            if frac || n == 0 || (1..=19).contains(&m100) {
+                1
+            } else {
+                2
+            }
+        }
+        _ if frac => 3,
+        Plural::Cs if one => 0,
+        Plural::Cs => {
+            if (2..=4).contains(&n) {
+                1
+            } else {
+                2
+            }
+        }
+        Plural::Pl if one => 0,
+        Plural::Ru if m10 == 1 && m100 != 11 => 0,
+        _ => {
+            if (2..=4).contains(&m10) && !(12..=14).contains(&m100) {
+                1
+            } else {
+                2
+            }
+        }
+    }
+}
+
+fn ohm_word(lang: &str, prefix: &str, num: Option<&str>) -> String {
+    let o = &OHM.iter().find(|(l, _)| *l == lang).expect("every language has ohm words").1;
+    let forms = match o.prefixed {
+        Some(p) if !prefix.is_empty() => p,
+        _ => o.forms,
+    };
+    let p = "kMGm".find(prefix).filter(|_| !prefix.is_empty()).map_or("", |i| o.pre[i]);
+    forms[ohm_form(o.plural, num)].replace("{}", p)
+}
+
+pub(super) fn ch_ohm(t: T, c: &mut Ctx) -> T {
+    let lang = c.lang().to_string();
+    let read: Vec<&str> = lookup(&OHM_READ, &lang).unwrap_or("").split_whitespace().collect();
+    let (before, one_ok) =
+        OHM_READ_BEFORE.iter().find(|(l, _, _)| *l == lang).map_or(("", true), |(_, u, ok)| (*u, *ok));
+    // Latin or Greek: Ω inside a word (a kana or hanzi beside it is fine: 抵抗は5Ωです)
+    let edge = r"[A-Za-z\x{C0}-\x{24F}\x{370}-\x{3FF}\x{1F00}-\x{1FFF}]";
+    let re = rx(&format!(
+        r"(?:(?<![\d.,_])(?<!{edge})(\d+(?:[.,]\d+)*)[ \t\x{{A0}}]?)?(?<!{edge})([kMGm]?)([\x{{2126}}\x{{3A9}}])(?!{edge})"
+    ));
+    c.sub(&re, &t, |m| {
+        let num = m.get(1).map(|x| x.as_str());
+        let (prefix, sym) = (g(m, 2), g(m, 3));
+        if sym == "\u{3A9}" && num.is_none() && prefix.is_empty() {
+            return None; // a Greek capital omega on its own is the letter
+        }
+        let unit = format!("{prefix}\u{3A9}");
+        let end = m.get(0).expect("group 0").end();
+        let next = caps(r"[ \t\x{A0}](\d+)(?![\d.,])|[ \t\x{A0}]\d", &t[end..]);
+        if num.is_none()
+            && before.split_whitespace().any(|u| u == unit)
+            && next.is_some_and(|nx| one_ok || nx.get(1).map(|x| x.as_str()) != Some("1"))
+        {
+            return Some(unit);
+        }
+        if let Some(num) = num {
+            if read.contains(&unit.as_str()) {
+                return Some(format!("{num} {unit}"));
+            }
+            let sep = if matches!(lang.as_str(), "ja" | "zh") { "" } else { " " }; // ja: 5オーム, not 5 オーム
+            return Some(format!("{num}{sep}{}", ohm_word(&lang, prefix, Some(num))));
+        }
+        Some(ohm_word(&lang, prefix, None))
+    })
 }
 
 pub(super) fn ch_fracslash(t: T, c: &mut Ctx) -> T {
@@ -1016,6 +1343,35 @@ pub(super) fn en_units(t: T, c: &mut Ctx) -> T {
         search(r"(?i)\b(?:a|an|the|this|that|one|each|every|per)\s+$", &t[..w.start()])
             && !NOT_NOUN.contains(g(&nxt, 1))
     };
+    // “25 mins.” at the end of a sentence: the abbreviation's dot was also the full stop, keep one
+    let sentence_dot = |t: &str, m: &Captures<'_, str>| -> &'static str {
+        let w = m.get(0).expect("group 0");
+        if w.as_str().ends_with('.') && matches_at_start(r"\s*$|\s+[A-Z]", &t[w.end()..]) { "." } else { "" }
+    };
+    // 0900 hrs → oh nine hundred hours; at 1430 hours → fourteen thirty hours
+    let cur = t.clone();
+    t = c.sub(&rx(r"(?<![\w.:,])([0-2][0-9])([0-5][0-9])\s?(?:hrs?\.?|hours|HRS)(?![A-Za-z/])"), &cur, |m| {
+        let (hh, mm) = (g(m, 1), g(m, 2));
+        let w = m.get(0).expect("group 0");
+        if py_int(hh) > 23
+            || (!hh.starts_with('0')
+                && !search(r"(?i)\b(?:at|by|until|till|from|before|after|since|around)\s+$", &cur[..w.start()]))
+        {
+            return None; // 1500 hours of training is a duration
+        }
+        let oh = |s: &str| if s.starts_with('0') { "oh " } else { "" };
+        let hour = if hh == "00" {
+            (if mm != "00" { "zero zero" } else { "zero" }).to_string()
+        } else {
+            format!("{}{}", oh(hh), number_words(py_int(hh) as i128, false))
+        };
+        let minute = if mm == "00" {
+            "hundred".to_string()
+        } else {
+            format!("{}{}", oh(mm), number_words(py_int(mm) as i128, false))
+        };
+        Some(format!("{hour} {minute} hours{}", sentence_dot(&cur, m)))
+    });
     for (pat, words) in UNITS {
         let cur = t.clone();
         t = match words {
@@ -1028,7 +1384,12 @@ pub(super) fn en_units(t: T, c: &mut Ctx) -> T {
                 ))
             }),
             Some((s, p)) => c.sub(&rx(&format!(r"(?<![\w.]){amount}(\s?)({pat})(?![A-Za-z/])")), &cur, |m| {
-                Some(format!("{} {}", commas(g(m, 1)), if adjectival(&cur, m) { *s } else { plur(g(m, 1), s, p) }))
+                Some(format!(
+                    "{} {}{}",
+                    commas(g(m, 1)),
+                    if adjectival(&cur, m) { *s } else { plur(g(m, 1), s, p) },
+                    sentence_dot(&cur, m)
+                ))
             }),
         };
     }

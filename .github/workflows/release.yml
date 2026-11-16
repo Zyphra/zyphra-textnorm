@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --no-index --find-links dist zyphra-textnorm
-          python -c "import zyphra_textnorm as t; assert t.normalize('It costs \$5.', 'en') == 'It costs five dollars.'; assert t.Normalizer(['laugh']).normalize('a <laugh/> \$5', 'en') == 'a <laugh/> five dollars'"
+          python -c "import zyphra_textnorm as t; assert t.normalize('It costs \$5.', 'en') == 'It costs five dollars.'; assert t.Normalizer(['laugh']).normalize('a <laugh/> \$5', 'en') == 'a <laugh/> five dollars'; assert t.Normalizer(prepass=True).normalize('2 - 7 = -5', 'es') == 'dos menos siete es igual a menos cinco'"
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ runner.os }}-${{ matrix.target }}

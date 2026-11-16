@@ -28,7 +28,7 @@ include = [
 members = ["python"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 # let chains
 rust-version = "1.88"
@@ -46,7 +46,7 @@ default = [
     "lang-ro", "lang-sk", "lang-bg", "lang-he", "lang-th", "lang-tl", "lang-ms", "lang-ka", "lang-ta",
     "lang-gu", "lang-kn", "lang-ml", "lang-pa", "lang-or",
     "lang-ru", "lang-sv", "lang-hu", "lang-ar", "lang-vi", "lang-id", "lang-hi", "lang-bn", "lang-te",
-    "lang-mr", "lang-ur",
+    "lang-mr", "lang-ur", "prepass",
 ]
 lang-en = []
 lang-de = []
@@ -94,9 +94,10 @@ lang-ur = []
 # The C ABI (include/zyphra_textnorm.h). Build the static library with
 # `cargo rustc --release --lib --features capi --crate-type staticlib`.
 capi = []
-# The opt-in pre-pass for chat and markdown text (src/prepass/, `Normalizer::with_prepass`). Off by default: it is the
-# only feature with dependencies (fancy-regex for the rules' lookarounds and backreferences, regex for a fast
-# prefilter that skips a rule when it cannot match).
+# The pre-pass for chat and markdown text and the per-language reading fixes (src/prepass/), on in every normalizer
+# unless `Normalizer::with_prepass(false)`. The only feature with dependencies (fancy-regex for the rules' lookarounds
+# and backreferences, regex for a fast prefilter that skips a rule when it cannot match); a build without it
+# (`default-features = false` and the languages) is dependency-free and gives the NeMo-parity output.
 prepass = ["dep:fancy-regex", "dep:regex"]
 
 [dependencies]

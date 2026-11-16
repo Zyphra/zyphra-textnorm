@@ -1,7 +1,9 @@
 //! Opt-in pre-pass (feature `prepass`, [`crate::Normalizer::with_prepass`]): narrow rewrites of chat and markdown text
 //! before the grammars see it, for what a speech model is given in practice and the NeMo grammars were not written for:
 //! markdown (emphasis, bullets, headings, tables, links, code fences), HTML/SSML tags and entities, emoji, typographic
-//! look-alikes, and English readings the grammars get wrong (units, ranges, versions, powers, decades, abbreviations, …).
+//! look-alikes, English readings the grammars get wrong (units, ranges, versions, powers, decades, abbreviations, …),
+//! and in every language the readings its grammar gets wrong (number agreement, money, dates, times, ranges, emails,
+//! phone numbers, …; [`lang`]).
 //!
 //! Off by default: with it off every output is the NeMo-parity output the goldens pin. Each rule rewrites the written
 //! text only (the grammars are untouched) and is deliberately narrow, with guards for what it must not touch. The
@@ -9,8 +11,11 @@
 //! files and NeMo's own tests; this module is a line-for-line port of that prototype, and `tests/prepass.rs` pins
 //! every golden row whose output the pre-pass changes.
 //!
-//! The rule order is [`ORDER`]. A rule runs in all languages, in all but ja/zh/ko, or in English only.
+//! The rule order is [`ORDER`]. A rule there runs in all languages, in all but ja/zh/ko, or in one language. The
+//! per-language and shared rules of [`lang`] run inside that order: the shared early rules after `en.url`, the
+//! language's own and the shared late rules after `ch.midbullet`.
 
+mod lang;
 mod rules;
 mod tables;
 
@@ -32,11 +37,12 @@ enum Langs {
     All,
     NonCjk,
     En,
+    Es,
 }
 
 /// The rules in the order they run: markup first (fences, tables, headings, tags, links, emphasis), then characters,
 /// then the English context rules.
-pub const ORDER: [&str; 59] = [
+pub const ORDER: [&str; 61] = [
     "md.fence",
     "md.rule",
     "md.table",
@@ -67,9 +73,11 @@ pub const ORDER: [&str; 59] = [
     "ch.endash-pause",
     "ch.ellipsis",
     "ch.invisible",
+    "es.ves",
     "ch.fullwidth",
     "ch.ligature",
     "ch.lookalike",
+    "ch.ohm",
     "ch.fracslash",
     "ch.bang",
     "ch.subscript",
@@ -128,9 +136,11 @@ fn rule(id: &str) -> (Langs, RuleFn) {
         "ch.endash-pause" => (En, ch_endash_pause),
         "ch.ellipsis" => (En, ch_ellipsis),
         "ch.invisible" => (All, ch_invisible),
+        "es.ves" => (Es, es_ves),
         "ch.fullwidth" => (All, ch_fullwidth),
         "ch.ligature" => (All, ch_ligature),
         "ch.lookalike" => (All, ch_lookalike),
+        "ch.ohm" => (All, ch_ohm),
         "ch.fracslash" => (All, ch_fracslash),
         "ch.bang" => (NonCjk, ch_bang),
         "ch.subscript" => (En, ch_subscript),
@@ -190,10 +200,19 @@ pub(crate) fn apply_spans<S: AsRef<str>>(
             Langs::All => true,
             Langs::NonCjk => !cjk,
             Langs::En => language == "en",
+            Langs::Es => language == "es",
         };
         if runs {
             ctx.rid = id;
             t = f(t, &mut ctx);
+        }
+        // the shared and per-language rules (prepass/lang): EARLY after en.url, the language's own and LATE after
+        // the character rules
+        if id == "en.url" {
+            t = lang::run(lang::EARLY, t, &mut ctx);
+        } else if id == "ch.midbullet" {
+            t = lang::run(lang::rules(language), t, &mut ctx);
+            t = lang::run(lang::LATE, t, &mut ctx);
         }
     }
     if !ctx.hits.is_empty() {
@@ -784,7 +803,7 @@ fn ordinal_digits(n: &str) -> String {
 
 /// The English grammar's reading of a short string (rules that spell a number need its words).
 fn english(s: &str) -> String {
-    crate::normalize(s, "en")
+    crate::normalize_plain(s, "en")
 }
 
 #[cfg(test)]
@@ -836,11 +855,36 @@ mod tests {
     #[test]
     fn emoji() {
         use tables::{emoji_list, emoji_name};
-        assert_eq!(emoji_name("👍🏽").as_deref(), Some("thumbs up emoji"));
-        assert_eq!(emoji_name("🇯🇵").as_deref(), Some("Japan flag emoji"));
-        assert_eq!(emoji_name("©"), None);
+        assert_eq!(emoji_name("👍🏽", "en").as_deref(), Some("thumbs up emoji"));
+        assert_eq!(emoji_name("🇯🇵", "en").as_deref(), Some("Japan flag emoji"));
+        assert_eq!(emoji_name("©", "en"), None);
+        // the other languages: CLDR's name and the language's word for emoji, skin tones dropped
+        assert_eq!(emoji_name("👍🏽", "es").as_deref(), Some("emoji pulgar hacia arriba"));
+        assert_eq!(emoji_name("🇯🇵", "es").as_deref(), Some("emoji Bandera Japón"));
+        assert_eq!(emoji_name("😀", "ur").as_deref(), Some("کھل کے ہنستا چہرہ ایموجی"));
+        assert_eq!(emoji_name("😀", "ja").as_deref(), Some("にっこり笑うの絵文字"));
         let spans = emoji_list("a 👨‍💻 b 1️⃣");
         assert_eq!(spans.iter().map(|s| s.2.as_str()).collect::<Vec<_>>(), ["👨‍💻", "1️⃣"]);
+    }
+
+    #[test]
+    fn ohm_units() {
+        let read = |t: &str, lang: &str| apply(t, lang, &[] as &[&str]).0;
+        assert_eq!(read("\u{2126}", "hi"), "ओम"); // the ohm sign alone is the unit
+        assert_eq!(read("\u{3A9}", "en"), "\u{3A9}"); // a Greek capital omega alone is the letter
+        assert_eq!(read("5 k\u{2126}", "hi"), "5 k\u{3A9}"); // the Hindi grammar reads kΩ
+        assert_eq!(read("2 k\u{2126}", "ru"), "2 килоома");
+        assert_eq!(read("5 k\u{2126}", "ru"), "5 килоом");
+        assert_eq!(read("1,5 k\u{2126}", "ru"), "1,5 килоома");
+        assert_eq!(read("22 k\u{2126}", "pl"), "22 k\u{3A9}");
+        assert_eq!(read("22 G\u{2126}", "pl"), "22 gigaomy");
+        assert_eq!(read("5 G\u{2126}", "cs"), "5 gigaohmů");
+        assert_eq!(read("25 k\u{2126}", "ro"), "25 de kiloohmi");
+        assert_eq!(read("1 k\u{2126}", "de"), "ein Kiloohm"); // de.one: 1 before a noun
+        assert_eq!(read("5 k\u{2126}", "el"), "5 κιλοώμ");
+        assert_eq!(read("抵抗は5\u{2126}です", "ja"), "抵抗は5オームです");
+        assert_eq!(read("k\u{2126} 123", "ar"), "k\u{3A9} 123"); // Arabic reads it as 123 kiloohm
+        assert_eq!(read("\u{2126} 1", "ar"), "أوم 1");
     }
 
     #[test]
@@ -854,9 +898,10 @@ mod tests {
     #[test]
     fn every_rule_runs() {
         // every pattern compiles: English runs all rules but the non-English branches
-        for lang in ["en", "de", "ja"] {
+        for lang in ["en", "de", "ja", "es", "ar", "ru"] {
             let (_, hits) = apply(
-                "# Hi\n- **a** <b>x</b> &amp; [l](u) 25.5* 😀 #tag `c` – … ７ ﬁ µ 1⁄2 ‼ CO₂ · x² ~5 2*3",
+                "# Hi\n- **a** <b>x</b> &amp; [l](u) 25.5* 😀 #tag `c` – … ７ ﬁ µ 1⁄2 ‼ CO₂ · x² ~5 2*3 5 kΩ Ω 12 \
+                 829ves :smile:\n# A comment.",
                 lang,
                 &["laugh"],
             );

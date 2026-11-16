@@ -10,7 +10,7 @@
 {"group": "Dogfood reports", "lang": "en", "text": "The cable is 5 m long. The project costs $5M.", "out": "The cable is five meters long. The project costs five million dollars.", "target": "The cable is five meters long. The project costs five million dollars.", "status": "matches"}
 {"group": "Dogfood reports", "lang": "en", "text": "Ms. Green measured a delay of 25 ms.", "out": "Miz Green measured a delay of twenty five milliseconds.", "target": "Miz Green measured a delay of twenty five milliseconds.", "status": "matches"}
 {"group": "Dogfood reports", "lang": "en", "text": "The vial holds 2 mL. The reservoir holds 2 ML.", "out": "The vial holds two milliliters. The reservoir holds two M L.", "target": "The vial holds two milliliters. The reservoir holds two megaliters.", "status": "differs"}
-{"group": "Dogfood reports", "lang": "en", "text": "Wait 2–3 mins, not 2–3 hrs. The final step takes 30 secs.", "out": "Wait two to three minutes, not two to three hours The final step takes thirty seconds", "target": "Wait two to three minutes, not two to three hours. The final step takes thirty seconds.", "status": "matches"}
+{"group": "Dogfood reports", "lang": "en", "text": "Wait 2–3 mins, not 2–3 hrs. The final step takes 30 secs.", "out": "Wait two to three minutes, not two to three hours. The final step takes thirty seconds.", "target": "Wait two to three minutes, not two to three hours. The final step takes thirty seconds.", "status": "matches"}
 {"group": "Dogfood reports", "lang": "en", "text": "Thanks, @alex! Your entry is #1 in the #VoiceAI challenge.", "out": "Thanks, at alex! Your entry is number one in the VoiceAI challenge.", "target": "Thanks, at alex! Your entry is number one in the VoiceAI challenge.", "status": "matches"}
 {"group": "Dogfood reports", "lang": "en", "text": "Call +1 (202) 555-0147, extension 007.", "out": "Call plus one, two zero two, five five five, zero one four seven, extension zero zero seven.", "target": "Call plus one, two oh two, five five five, oh one four seven, extension double-oh seven.", "status": "differs"}
 {"group": "Dogfood reports", "lang": "en", "text": "The total is ₹1,25,000.", "out": "The total is one lakh twenty five thousand rupees.", "target": "The total is one lakh twenty five thousand rupees.", "status": "matches"}
@@ -112,7 +112,7 @@
 {"group": "Markup", "lang": "en", "text": "The # of users doubled.", "out": "The number of users doubled.", "target": "The number of users doubled.", "status": "matches"}
 {"group": "Markup", "lang": "en", "text": "Set the color to #FF5733 or #fff.", "out": "Set the color to FF five thousand seven hundred thirty three or fff.", "target": "", "status": "open"}
 {"group": "Markup", "lang": "en", "text": "see docs.html#install and a#b", "out": "see docs.html hash install and a hash b", "target": "", "status": "open"}
-{"group": "Markup", "lang": "es", "text": "Me encanta #VidaSana", "out": "Me encanta VidaSana", "target": "Me encanta VidaSana", "status": "matches"}
+{"group": "Markup", "lang": "es", "text": "Me encanta #VidaSana", "out": "Me encanta Vida Sana", "target": "Me encanta VidaSana", "status": "differs"}
 {"group": "Markup", "lang": "ja", "text": "今日は #東京 で", "out": "今日は東京で", "target": "今日は東京で", "status": "matches"}
 {"group": "Markup", "lang": "hi", "text": "धन्यवाद #भारत", "out": "धन्यवाद भारत", "target": "धन्यवाद भारत", "status": "matches"}
 {"group": "Markup", "lang": "en", "text": "C# and F# minor", "out": "C sharp and F sharp minor", "target": "C sharp and F sharp minor", "status": "matches"}
@@ -237,6 +237,34 @@
 {"group": "Found in fineweb", "lang": "en", "text": "a 5G network at 73°W", "out": "a five G network at seventy three degrees west", "target": "a five G network at seventy three degrees west", "status": "matches"}
 {"group": "Found in fineweb", "lang": "en", "text": "The summit is at 40°26′46″N, 79°58′56″W.", "out": "The summit is at forty degrees twenty six minutes forty six seconds north, seventy nine degrees fifty eight minutes fifty six seconds west.", "target": "The summit is at forty degrees twenty six minutes forty six seconds north, seventy nine degrees fifty eight minutes fifty six seconds west.", "status": "matches"}
 {"group": "Found in fineweb", "lang": "en", "text": "the 4s and 5s, Keystone XL, the CCC", "out": "the four S and five S, Keystone XL, the CCC", "target": "the four S and five S, Keystone XL, the CCC", "status": "matches"}
+{"group": "Other languages", "lang": "hi", "text": "Ω", "out": "ओम", "target": "ओम", "status": "matches"}
+{"group": "Other languages", "lang": "hi", "text": "प्रतिरोध 5 kΩ है", "out": "प्रतिरोध पाँच किलोओम है", "target": "प्रतिरोध पाँच किलोओम है", "status": "matches"}
+{"group": "Other languages", "lang": "pl", "text": "kΩ", "out": "kiloom", "target": "kiloom", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "Una resistencia de 220 Ω.", "out": "Una resistencia de doscientos veinte ohmios.", "target": "Una resistencia de doscientos veinte ohmios.", "status": "matches"}
+{"group": "Other languages", "lang": "ru", "text": "Резистор на 2 kΩ.", "out": "Резистор на два килоома.", "target": "Резистор на два килоома.", "status": "matches"}
+{"group": "Other languages", "lang": "ru", "text": "Резистор на 5 kΩ.", "out": "Резистор на пять килоом.", "target": "Резистор на пять килоом.", "status": "matches"}
+{"group": "Other languages", "lang": "ja", "text": "抵抗は5Ωです。", "out": "抵抗は五オームです。", "target": "抵抗は五オームです。", "status": "matches"}
+{"group": "Other languages", "lang": "de", "text": "Widerstand: 4,7 kΩ", "out": "Widerstand: vier komma sieben Kiloohm", "target": "Widerstand: vier komma sieben Kiloohm", "status": "matches"}
+{"group": "Other languages", "lang": "en", "text": "The input is 5 GΩ.", "out": "The input is five gigohms.", "target": "The input is five gigohms.", "status": "matches"}
+{"group": "Other languages", "lang": "en", "text": "Use the Ω symbol.", "out": "Use the ohm symbol.", "target": "Use the ohm symbol.", "status": "matches"}
+{"group": "Other languages", "lang": "en", "text": "Big Ω notation", "out": "Big omega notation", "target": "Big omega notation", "status": "matches"}
+{"group": "Other languages", "lang": "el", "text": "Ω Θεέ μου", "out": "Ω Θεέ μου", "target": "Ω Θεέ μου", "status": "matches"}
+{"group": "Other languages", "lang": "ur", "text": "😀 ٹھیک ہے", "out": "کھل کے ہنستا چہرہ ایموجی ٹھیک ہے", "target": "کھل کے ہنستا چہرہ ایموجی ٹھیک ہے", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "Me encanta 😀", "out": "Me encanta emoji cara sonriendo", "target": "Me encanta emoji cara sonriendo", "status": "matches"}
+{"group": "Other languages", "lang": "ja", "text": "今日は3日😀です", "out": "今日は三日にっこり笑うの絵文字です", "target": "今日は三日にっこり笑うの絵文字です", "status": "matches"}
+{"group": "Other languages", "lang": "hi", "text": "धन्यवाद 🙏🏽", "out": "धन्यवाद अभिवादन इमोजी", "target": "धन्यवाद अभिवादन इमोजी", "status": "matches"}
+{"group": "Other languages", "lang": "de", "text": "Danke :+1:", "out": "Danke :plus eins:", "target": "Danke Emoji Daumen hoch", "status": "differs"}
+{"group": "Other languages", "lang": "fr", "text": "🇫🇷 Bravo !", "out": "émoji drapeau France Bravo!", "target": "émoji drapeau France Bravo!", "status": "matches"}
+{"group": "Other languages", "lang": "ru", "text": "Спасибо ❤️", "out": "Спасибо эмодзи алое сердце", "target": "Спасибо эмодзи алое сердце", "status": "matches"}
+{"group": "Other languages", "lang": "ko", "text": "좋아요 👍", "out": "좋아요 올린 엄지 이모지", "target": "좋아요 올린 엄지 이모지", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "# Additional currencies are listed below.", "out": "almohadilla Additional currencies are listed below.", "target": "almohadilla Additional currencies are listed below.", "status": "matches"}
+{"group": "Other languages", "lang": "en", "text": "# This file lists the currencies.", "out": "hash This file lists the currencies.", "target": "hash This file lists the currencies.", "status": "matches"}
+{"group": "Other languages", "lang": "en", "text": "# Version 2.0\nNotes here.", "out": "Version two point oh. Notes here.", "target": "Version two point oh. Notes here.", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "Pagué 829ves ayer.", "out": "Pagué ochocientos veintinueve bolívares soberanos ayer.", "target": "Pagué ochocientos veintinueve bolívares soberanos ayer.", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "Cuesta 261 VES.", "out": "Cuesta doscientos sesenta y un bolívares soberanos.", "target": "Cuesta doscientos sesenta y un bolívares soberanos.", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "Son VES 817.", "out": "Son ochocientos diecisiete bolívares soberanos.", "target": "Son ochocientos diecisiete bolívares soberanos.", "status": "matches"}
+{"group": "Other languages", "lang": "es", "text": "en la página 261 ves la tabla", "out": "en la página doscientos sesenta y uno ves la tabla", "target": "en la página doscientos sesenta y un ves la tabla", "status": "differs"}
+{"group": "Other languages", "lang": "en", "text": "…3 and", "out": "... three and", "target": "... three and", "status": "matches"}
 {"group": "Minus or range", "lang": "en", "text": "What is 10 - 5?", "out": "What is ten minus five?", "target": "What is ten minus five?", "status": "matches"}
 {"group": "Minus or range", "lang": "en", "text": "10 - 5 is 5.", "out": "ten minus five is five.", "target": "ten minus five is five.", "status": "matches"}
 {"group": "Minus or range", "lang": "en", "text": "We need n - 1 layers.", "out": "We need n minus one layers.", "target": "We need n minus one layers.", "status": "matches"}

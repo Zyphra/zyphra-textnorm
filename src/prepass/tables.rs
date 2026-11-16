@@ -1,5 +1,6 @@
 //! The pre-pass tables (`data/prepass/`, written by `oracle/prepass_tables.py`): HTML character references as Python's
-//! `html.unescape` reads them, and the emoji package's (2.14.1) names, shortcodes and tokenizer.
+//! `html.unescape` reads them, the emoji package's (2.14.1) names, shortcodes and tokenizer, and CLDR 46's emoji names
+//! in the other languages.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -120,9 +121,93 @@ fn textlike(s: &str) -> bool {
         || ('\u{2B05}'..'\u{2B08}').contains(&c)
 }
 
-/// The spoken name of an emoji: its CLDR short name and “emoji” (“Japan flag emoji”), its digit for a keycap, or
-/// `None` for a text-style symbol (© ™ ↔ ▪ without U+FE0F) or anything that is not an emoji.
-pub(super) fn emoji_name(e: &str) -> Option<String> {
+/// How each language says “X emoji”: head-initial languages put the word for emoji first.
+const EMOJI_SAY: [(&str, &str); 43] = [
+    ("en", "{} emoji"),
+    ("de", "Emoji {}"),
+    ("es", "emoji {}"),
+    ("fr", "émoji {}"),
+    ("it", "emoji {}"),
+    ("pt", "emoji {}"),
+    ("ja", "{}の絵文字"),
+    ("zh", "{}表情"),
+    ("ko", "{} 이모지"),
+    ("nl", "emoji {}"),
+    ("pl", "emoji {}"),
+    ("tr", "{} emojisi"),
+    ("uk", "емодзі {}"),
+    ("cs", "emoji {}"),
+    ("da", "emoji {}"),
+    ("fi", "emoji {}"),
+    ("el", "εμότζι {}"),
+    ("nb", "emoji {}"),
+    ("ro", "emoji {}"),
+    ("sk", "emoji {}"),
+    ("bg", "емоджи {}"),
+    ("he", "אימוג'י {}"),
+    ("th", "อีโมจิ{}"),
+    ("tl", "emoji {}"),
+    ("ms", "emoji {}"),
+    ("ka", "{} ემოჯი"),
+    ("ta", "{} எமோஜி"),
+    ("gu", "{} ઇમોજી"),
+    ("kn", "{} ಎಮೋಜಿ"),
+    ("ml", "{} ഇമോജി"),
+    ("pa", "{} ਇਮੋਜੀ"),
+    ("or", "{} ଇମୋଜି"),
+    ("ru", "эмодзи {}"),
+    ("sv", "emoji {}"),
+    ("hu", "{} emoji"),
+    ("ar", "إيموجي {}"),
+    ("vi", "biểu tượng cảm xúc {}"),
+    ("id", "emoji {}"),
+    ("hi", "{} इमोजी"),
+    ("bn", "{} ইমোজি"),
+    ("te", "{} ఎమోజీ"),
+    ("mr", "{} इमोजी"),
+    ("ur", "{} ایموجی"),
+];
+
+/// CLDR 46 text-to-speech names (`emoji_names.tsv`): the languages of its header, and per emoji (no variation
+/// selectors, no skin tone) one name per language, empty where CLDR has none.
+struct Names {
+    langs: Vec<&'static str>,
+    rows: HashMap<String, Vec<&'static str>>,
+}
+
+static NAMES: LazyLock<Names> = LazyLock::new(|| {
+    let mut lines = include_str!("../../data/prepass/emoji_names.tsv").lines();
+    let header = lines.next().expect("emoji_names.tsv header");
+    let langs = header.split('\t').skip(1).collect();
+    let rows = lines
+        .map(|l| {
+            let mut f = l.split('\t');
+            let key = hex_str(f.next().expect("key"));
+            (key, f.collect())
+        })
+        .collect();
+    Names { langs, rows }
+});
+
+/// The CLDR name of `base` (an emoji without variation selectors) in `lang`, skin tones dropped, tidied for speech:
+/// quotes removed and “Bandera: Japón” → “Bandera Japón”.
+fn localized_name(base: &str, lang: &str) -> Option<String> {
+    let names = &*NAMES;
+    let col = names.langs.iter().position(|l| *l == lang)?;
+    let key: String = base.chars().filter(|c| !('\u{1F3FB}'..='\u{1F3FF}').contains(c)).collect();
+    let n = *names.rows.get(&key)?.get(col)?;
+    if n.is_empty() {
+        return None;
+    }
+    let n = n.replace(['“', '”', '„', '«', '»', '"', '‘'], "").replace(": ", " ");
+    let n = super::rx(r"\s+").replace_all(&n, " ").to_string();
+    Some(super::py_strip(&n).to_string())
+}
+
+/// The spoken name of an emoji in `lang`: in English its CLDR short name and “emoji” (“Japan flag emoji”), elsewhere
+/// CLDR's name in that language and its word for emoji (“emoji cara sonriendo”); its digit for a keycap; or `None`
+/// for a text-style symbol (© ™ ↔ ▪ without U+FE0F), anything that is not an emoji, or one `lang` has no name for.
+pub(super) fn emoji_name(e: &str, lang: &str) -> Option<String> {
     let base: String = e.chars().filter(|&c| c != '\u{FE0F}' && c != '\u{FE0E}').collect();
     if !base.is_empty() && textlike(&base) && !e.contains('\u{FE0F}') {
         return None;
@@ -133,6 +218,10 @@ pub(super) fn emoji_name(e: &str) -> Option<String> {
     }
     if e.contains('\u{20E3}') {
         return Some(base.replace('\u{20E3}', ""));
+    }
+    if lang != "en" {
+        let say = EMOJI_SAY.iter().find(|(l, _)| *l == lang)?.1;
+        return localized_name(&base, lang).map(|n| say.replace("{}", &n));
     }
     let skin = super::rx(r"_(?:light|medium-light|medium|medium-dark|dark)_skin_tone");
     let n = skin.replace_all(d.name.trim_matches(':'), "").replace('_', " ").replace(['“', '”'], "");
