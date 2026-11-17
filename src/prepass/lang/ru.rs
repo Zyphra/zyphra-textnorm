@@ -19,6 +19,8 @@ pub(super) const RULES: &[LangRule] = &[
     ("ru.latin", ru_latin),
     ("ru.city", ru_city),
     ("ru.address", ru_address),
+    ("ru.grouped-decimal", ru_grouped_decimal),
+    ("ru.money-range", ru_money_range),
     ("ru.cents", ru_cents),
     ("ru.date", ru_date),
     ("ru.year", ru_year),
@@ -31,6 +33,9 @@ pub(super) const RULES: &[LangRule] = &[
     ("ru.case-unit", ru_case_unit),
     ("ru.gender", ru_gender),
     ("ru.thousand", ru_thousand),
+    ("ru.trillion", ru_trillion),
+    ("ru.per-unit", ru_per_unit),
+    ("ru.abbr-dot", ru_abbr_dot),
 ];
 
 // ------------------------------------------------------------------------------------------------- morphology
@@ -141,6 +146,21 @@ fn noun(name: &str) -> Noun {
             ["центы", "центов", "центам", "центы", "центами", "центах"],
         ),
         "евро" => ("n", ["евро"; 6], ["евро"; 6]),
+        "гривна" => (
+            "f",
+            ["гривна", "гривны", "гривне", "гривну", "гривной", "гривне"],
+            ["гривны", "гривен", "гривнам", "гривны", "гривнами", "гривнах"],
+        ),
+        "фунт" => (
+            "m",
+            ["фунт", "фунта", "фунту", "фунт", "фунтом", "фунте"],
+            ["фунты", "фунтов", "фунтам", "фунты", "фунтами", "фунтах"],
+        ),
+        "пенс" => (
+            "m",
+            ["пенс", "пенса", "пенсу", "пенс", "пенсом", "пенсе"],
+            ["пенсы", "пенсов", "пенсам", "пенсы", "пенсами", "пенсах"],
+        ),
         "процент" => (
             "m",
             ["процент", "процента", "проценту", "процент", "процентом", "проценте"],
@@ -713,6 +733,13 @@ const CUR_TOK: &[(&str, &str)] = &[
     ("USD", "доллар"),
     ("€", "евро"),
     ("EUR", "евро"),
+    ("RUB", "рубль"),
+    ("грн.", "гривна"),
+    ("грн", "гривна"),
+    ("UAH", "гривна"),
+    ("₴", "гривна"),
+    ("£", "фунт"),
+    ("GBP", "фунт"),
 ];
 
 fn find<'a>(table: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
@@ -720,11 +747,18 @@ fn find<'a>(table: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
 }
 
 fn minor(major: &str) -> &'static str {
-    if major == "рубль" { "копейка" } else { "цент" }
+    match major {
+        "рубль" | "гривна" => "копейка",
+        "фунт" => "пенс",
+        _ => "цент",
+    }
 }
 
 fn ru_cents(t: String, c: &mut Ctx) -> String {
-    let pat = format!(r"{SKIP}(?:{}{SP}+)?{LB}({NUM}),(\d{{2}}){SP}?(₽|руб\.?|р\.|\$|USD|€|EUR)(?![\w])", *PREP_RX);
+    let pat = format!(
+        r"{SKIP}(?:{}{SP}+)?{LB}({NUM}),(\d{{2}}){SP}?(₽|руб\.?|р\.|\$|USD|€|EUR|RUB|грн\.?|UAH|₴|£|GBP)(?![\w])",
+        *PREP_RX
+    );
     c.sub(&rx(&pat), &t, |m| {
         if skipped(m) {
             return None;
@@ -1697,5 +1731,157 @@ fn ru_address(t: String, c: &mut Ctx) -> String {
             }
             .to_string(),
         )
+    })
+}
+
+// ============================================================================== money and big numbers (Nov 16 b)
+
+const MONEY_CUR: &str = r"₽|руб\.?|RUB|\$|USD|€|EUR|£|GBP|грн\.?|UAH|₴";
+const MONEY_SIGN: &str = r"[€$£¥₽₴]";
+
+fn ru_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<=\d)[ \xa0]?({MONEY_CUR})[ \xa0]?[-–~][ \xa0]?(\d[\d \xa0]*(?:,\d{{1,2}})?)[ \xa0]?\1(?![\w])"
+        )),
+        &t,
+        |m| Some(format!("–{} {}", g(m, 2), g(m, 1))),
+    );
+    let t = c.sub_tpl(&rx(r"(?<=\d) ?~ ?(?=\d)"), &t, "–");
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN}\d+(?:,\d{{1,2}})?) ?~ ?(?={MONEY_SIGN}?\d)")), &t, r"\1-")
+}
+
+/// 12345678 -> "12 345 678".
+fn group3(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn ru_trillion(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"{SKIP}(?<![\w\-–—.,/:+])([€$£₽] ?)?(\d{{1,3}}(?:[ \xa0]\d{{3}}){{4}}|[1-9]\d{{0,2}}0{{12}}){RB}(?![ \xa0]\d)(?:{SP}?({MONEY_CUR})(?![\w]))?"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let (sign, num) = (py_strip(g(m, 1)), g(m, 2));
+        if !sign.is_empty() && !g(m, 3).is_empty() {
+            return None;
+        }
+        let tok = if g(m, 3).is_empty() { sign } else { g(m, 3) };
+        let n = to_int(num);
+        if !(1_000_000_000_000..1_000_000_000_000_000).contains(&n) {
+            return None;
+        }
+        let rest = n % 1_000_000_000_000;
+        if tok.is_empty() {
+            return Some(card(n, NOM, "m"));
+        }
+        let out = if rest > 0 {
+            let tail =
+                if sign.is_empty() { format!("{} {tok}", group3(rest)) } else { format!("{sign}{}", group3(rest)) };
+            format!("{} {}", card(n - rest, NOM, "m"), words(&tail, "ru"))
+        } else {
+            let gw = words(&format!("5 {tok}"), "ru");
+            let tail = gw.strip_prefix("пять ")?;
+            if tail == tok {
+                return None;
+            }
+            format!("{} {tail}", card(n, NOM, "m"))
+        };
+        if search(r"\d", &out) {
+            return None;
+        }
+        Some(format!("{out}{}", drop_dot(tok, &t[end(m)..])))
+    })
+}
+
+fn ru_grouped_decimal(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"{SKIP}{LB}(\d{{1,3}}(?:[ \xa0]\d{{3}})+),(\d+)(?![\d])")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        Some(format!("{},{}", g(m, 1).replace([' ', '\u{a0}'], ""), g(m, 2)))
+    })
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("месяц", "в месяц"),
+    ("неделю", "в неделю"),
+    ("неделя", "в неделю"),
+    ("ночь", "за ночь"),
+    ("человека", "на человека"),
+    ("чел.", "на человека"),
+    ("упак.", "за упаковку"),
+    ("упак", "за упаковку"),
+    ("пачку", "за пачку"),
+    ("кв. м", "за квадратный метр"),
+    ("сотку", "за сотку"),
+    ("год", "в год"),
+    ("день", "в день"),
+    ("час", "в час"),
+    ("сутки", "в сутки"),
+    ("кг", "за килограмм"),
+    ("шт.", "за штуку"),
+];
+
+/// `|`-joined escaped keys, longest first (ties in table order).
+fn alternation(keys: &[&str]) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|")
+}
+
+fn ru_per_unit(t: String, c: &mut Ctx) -> String {
+    let dens = alternation(&PER_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>());
+    let t = c.sub(
+        &rx(&format!(
+            r"{SKIP}(?<![\w.,])({MONEY_SIGN})(\d{{1,3}}(?:[ \x{{A0}}]\d{{3}})+|\d+)(,\d{{1,2}})?/(?=[^\W\d_])"
+        )),
+        &t,
+        |m| if skipped(m) { None } else { Some(format!("{}{} {}/", g(m, 2), g(m, 3), g(m, 1))) },
+    );
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"{SKIP}(?<=\d)({SP}?(?:{MONEY_CUR}))/({dens})(?![\w])")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let den = g(m, 2);
+        let plain = words(&format!("5 {}/{den}", py_strip(g(m, 1))), "ru");
+        if plain.starts_with("пять ") && !plain.contains('/') {
+            return None;
+        }
+        let per = PER_UNIT.iter().find(|kv| kv.0 == den)?.1;
+        Some(format!("{} {per}{}", g(m, 1), drop_dot(den, &s[end(m)..])))
+    })
+}
+
+fn ru_abbr_dot(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"{SKIP}{LB}((?:\d{{1,3}}(?:[ \x{{A0}}]\d{{3}})+|\d+)(?:,\d{{1,2}})?(?:{SP}?(?:тыс\.|млн\.?|млрд\.?))?{SP}?(?:руб|коп))\."
+    );
+    let s: &str = &t;
+    c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let rest = &s[end(m)..];
+        if search(r"^[,;:!?)]", rest) {
+            return Some(g(m, 1).to_string());
+        }
+        if !py_strip(rest).is_empty() && !drop_dot(".", rest).is_empty() {
+            let out = words(g(m, 1), "ru");
+            return if search(r"\d", &out) { None } else { Some(format!("{out}.")) };
+        }
+        None
     })
 }

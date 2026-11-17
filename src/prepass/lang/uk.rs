@@ -25,10 +25,17 @@ pub(super) const RULES: &[LangRule] = &[
     ("uk.half", uk_half),
     ("uk.ordinal", uk_ordinal),
     ("uk.ordinal-range", uk_ordinal_range),
+    ("uk.grouped-decimal", uk_grouped_decimal),
+    ("uk.money-range", uk_money_range),
+    ("uk.latin-unit", uk_latin_unit),
     ("uk.range", uk_range),
     ("uk.case", uk_case),
+    ("uk.money-words", uk_money_words),
+    ("uk.per-unit", uk_per_unit),
+    ("uk.square", uk_square),
     ("uk.count", uk_count),
     ("uk.thousand", uk_thousand),
+    ("uk.big-number", uk_big_number),
 ];
 
 // ------------------------------------------------------------------------------------------------- morphology
@@ -1670,5 +1677,313 @@ fn uk_thousand(t: String, c: &mut Ctx) -> String {
         }
         let tail: String = gw.chars().skip(6).collect();
         Some(format!("{th} {tail}"))
+    })
+}
+
+// ============================================================================== money and big numbers (Nov 16 b)
+
+const MONEY_CUR: &str = r"₴|грн\.?|UAH|\$|USD|€|EUR|₽|RUB|руб\.?|£|GBP|PLN|zł|CHF";
+const MONEY_SIGN: &str = r"[€$£¥₽₴]";
+
+fn uk_money_range(t: String, c: &mut Ctx) -> String {
+    // UAH, USD, EUR after a number: the sign the grammar and the case rules read (5–10 UAH, від 5 USD, 2,5 EUR)
+    let t = c.sub(&rx(&format!(r"(?<=\d)({SP}?)(UAH|USD|EUR)(?![\w])")), &t, |m| {
+        let sign = match g(m, 2) {
+            "UAH" => "грн",
+            "USD" => "$",
+            _ => "€",
+        };
+        Some(format!("{}{sign}", g(m, 1)))
+    });
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<=\d)[ \xa0]?({MONEY_CUR})[ \xa0]?[-–~][ \xa0]?(\d[\d \xa0]*(?:,\d{{1,2}})?)[ \xa0]?\1(?![\w])"
+        )),
+        &t,
+        |m| Some(format!("–{} {}", g(m, 2), g(m, 1))),
+    );
+    // a sign before the first number of a range that the grammar leaves (£5-10, ₽5~10): after the range
+    let t = c.sub(&rx(r"(?<![\w.,])([£₽¥])(\d+) ?[-–~] ?(\d+)(?![\d,.]?\d)"), &t, |m| {
+        Some(format!("{}–{} {}", g(m, 2), g(m, 3), g(m, 1)))
+    });
+    let t =
+        c.sub_tpl(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN}\d+(?:,\d{{1,2}})?) ?~ ?(?={MONEY_SIGN}?\d)")), &t, r"\1-");
+    let t = c.sub_tpl(&rx(r"(?<=\d) ?~ ?(?=\d)"), &t, "–");
+    // a hyphen range before a currency the grammar reads only after a whole number: the dash the range rule reads
+    c.sub_tpl(
+        &rx(&format!(
+            r"(?<![\w.,\-–])(\d+)-(\d+)(?={SP}?(?:₽|RUB|руб\.?|PLN|zł|£|GBP|HUF|Ft|RON|MDL|BYN|CZK|Kč|JPY|¥)(?![\w]))"
+        )),
+        &t,
+        r"\1–\2",
+    )
+}
+
+const LATIN_UNIT: &[(&str, &str)] = &[
+    ("km²", "км²"),
+    ("m²", "м²"),
+    ("km", "км"),
+    ("kg", "кг"),
+    ("cm", "см"),
+    ("mm", "мм"),
+    ("ml", "мл"),
+    ("ha", "га"),
+    ("m", "м"),
+    ("t", "т"),
+    ("l", "л"),
+    ("g", "г"),
+];
+
+/// `|`-joined keys, longest first (ties in table order); `escape` runs `re.escape` on each.
+fn alternation(keys: &[&str], escape: bool) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.iter().map(|k| if escape { super::super::re_escape(k) } else { k.to_string() }).collect::<Vec<_>>().join("|")
+}
+
+fn uk_latin_unit(t: String, c: &mut Ctx) -> String {
+    let units = alternation(&LATIN_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>(), false);
+    c.sub(&rx(&format!(r"(?<=\d)({SP}?)({units})(?![\w/²³'])")), &t, |m| {
+        Some(format!("{}{}", g(m, 1), find(LATIN_UNIT, g(m, 2))?))
+    })
+}
+
+/// A currency: forms after 1, 2-4, 5+, the genitive singular after a decimal, gender, and the hundredths.
+type Cur = (&'static str, &'static str, &'static str, &'static str, &'static str, Option<[&'static str; 4]>);
+const COPECK: Option<[&str; 4]> = Some(["копійка", "копійки", "копійок", "f"]);
+const GROSH: Option<[&str; 4]> = Some(["грош", "гроші", "грошів", "m"]);
+const PENNY: Option<[&str; 4]> = Some(["пенс", "пенси", "пенсів", "m"]);
+const OTHER_CUR: &[(&str, Cur)] = &[
+    ("₽", ("рубль", "рублі", "рублів", "рубля", "m", COPECK)),
+    ("RUB", ("рубль", "рублі", "рублів", "рубля", "m", COPECK)),
+    ("руб.", ("рубль", "рублі", "рублів", "рубля", "m", COPECK)),
+    ("руб", ("рубль", "рублі", "рублів", "рубля", "m", COPECK)),
+    ("PLN", ("злотий", "злоті", "злотих", "злотого", "m", GROSH)),
+    ("zł", ("злотий", "злоті", "злотих", "злотого", "m", GROSH)),
+    ("£", ("фунт", "фунти", "фунтів", "фунта", "m", PENNY)),
+    ("GBP", ("фунт", "фунти", "фунтів", "фунта", "m", PENNY)),
+    ("HUF", ("форинт", "форинти", "форинтів", "форинта", "m", None)),
+    ("Ft", ("форинт", "форинти", "форинтів", "форинта", "m", None)),
+    ("RON", ("румунський лей", "румунські леї", "румунських леїв", "румунського лея", "m", None)),
+    ("MDL", ("молдовський лей", "молдовські леї", "молдовських леїв", "молдовського лея", "m", None)),
+    ("BYN", ("білоруський рубль", "білоруські рублі", "білоруських рублів", "білоруського рубля", "m", COPECK)),
+    ("CZK", ("чеська крона", "чеські крони", "чеських крон", "чеської крони", "f", None)),
+    ("Kč", ("чеська крона", "чеські крони", "чеських крон", "чеської крони", "f", None)),
+    ("JPY", ("єна", "єни", "єн", "єни", "f", None)),
+    ("¥", ("єна", "єни", "єн", "єни", "f", None)),
+];
+
+fn other_cur(code: &str) -> Option<Cur> {
+    OTHER_CUR.iter().find(|kv| kv.0 == code).map(|kv| kv.1)
+}
+
+/// n and the noun (sg, few, many, gender) in the form it needs (один рубль, два рублі, п'ять рублів; after a round
+/// thousand the genitive plural).
+fn counted(n: u64, forms: [&str; 4]) -> String {
+    let [sg, few, many, gender] = forms;
+    if n >= 1000 && n.is_multiple_of(1000) {
+        return format!("{} {many}", card(n, NOM, gender));
+    }
+    let (num, case) = agree(n, NOM);
+    format!(
+        "{} {}",
+        card(n, NOM, gender),
+        if num == 0 {
+            sg
+        } else if case == NOM {
+            few
+        } else {
+            many
+        }
+    )
+}
+
+/// The genitive cardinal words uk.case writes (and одного/однієї, тисяч …), longest first.
+static GEN_WORDS: LazyLock<String> = LazyLock::new(|| {
+    let mut keys: Vec<u64> = (2..=20).collect();
+    keys.extend([30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900]);
+    let mut ws: Vec<&str> = keys.iter().map(|&k| card_forms(k)[1]).collect();
+    ws.extend(["одного", "однієї", "тисяч", "мільйонів", "мільярдів"]);
+    ws.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then(a.cmp(b)));
+    ws.dedup();
+    ws.join("|")
+});
+
+fn uk_money_words(t: String, c: &mut Ctx) -> String {
+    // a sign before a one-decimal amount: after it (€2,5 → 2,5 € → дві цілих п'ять десятих євро)
+    let t = c.sub(&rx(&format!(r"{SKIP}(?<![\w.,])([€$])(\d+),(\d)(?![\d\w]|,\d)")), &t, |m| {
+        if skipped(m) { None } else { Some(format!("{},{} {}", g(m, 2), g(m, 3), g(m, 1))) }
+    });
+    let t = c.sub(
+        &rx(&format!(
+            r"{SKIP}(?<![\w.,])([£₽¥])(\d{{1,3}}(?:[ \xa0]\d{{3}})+|\d+)(,\d{{1,2}})?(?!\d|,\d|{SP}?(?:тис|млн|млрд))"
+        )),
+        &t,
+        |m| if skipped(m) { None } else { Some(format!("{}{} {}", g(m, 2), g(m, 3), g(m, 1))) },
+    );
+    let codes = alternation(&OTHER_CUR.iter().map(|kv| kv.0).collect::<Vec<_>>(), true);
+    let s: &str = &t;
+    let t2 = c.sub(
+        &rx(&format!(
+            r"{SKIP}(?<![\w.,])([-−])?(\d{{1,3}}(?:[ \xa0]\d{{3}})+|\d+)(?:,(\d{{1,2}}))?{SP}?({codes})(?![\w])"
+        )),
+        &t,
+        |m| {
+            if skipped(m) {
+                return None;
+            }
+            let (sign, num, code) = (g(m, 1), g(m, 2), g(m, 4));
+            let frac = m.get(3).map(|x| x.as_str());
+            let (sg, few, many, gen_sg, gender, minor) = other_cur(code)?;
+            let minus = if sign.is_empty() { "" } else { "мінус " };
+            if let Some(pm) = caps(&format!(r"{}{SP}+$", *PREP_RX), &s[..start(m)]) {
+                let p = g(&pm, 1);
+                if lookup(PREP_CASE, &p.to_lowercase()) != Some(GEN) || frac.is_some() {
+                    return None;
+                }
+                let n = to_int(num);
+                let one = n % 10 == 1 && n % 100 != 11 && !(n >= 1000 && n.is_multiple_of(1000));
+                let out = format!("{minus}{} {}", card(n, GEN, gender), if one { gen_sg } else { many });
+                let plain = words(&format!("{p} {}", &m[0]), "uk");
+                if plain.trim_end_matches('.') == format!("{p} {out}") {
+                    return None;
+                }
+                return Some(format!("{out}{}", drop_dot(code, &s[end(m)..])));
+            }
+            if frac.is_none() && ["₽", "RUB", "руб.", "руб"].contains(&code) {
+                return None;
+            }
+            let n = to_int(num);
+            let out = match frac {
+                Some(f) if f.chars().count() == 1 => format!("{} {gen_sg}", decimal(n, f, NOM)),
+                _ => {
+                    let mut o = counted(n, [sg, few, many, gender]);
+                    let cents = frac.map_or(0, to_int);
+                    if cents > 0 {
+                        let w = match minor {
+                            Some(mi) => counted(cents, mi),
+                            None => card(cents, NOM, "m"),
+                        };
+                        o = format!("{o} {w}");
+                    }
+                    o
+                }
+            };
+            Some(format!("{minus}{out}{}", drop_dot(code, &s[end(m)..])))
+        },
+    );
+    c.sub(&rx(&format!(r"{SKIP}(?<![\w'])({}){SP}({codes})(?![\w])", *GEN_WORDS)), &t2, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let (_, _, many, gen_sg, _, _) = other_cur(g(m, 2))?;
+        let w = g(m, 1);
+        Some(format!("{w} {}", if w == "одного" || w == "однієї" { gen_sg } else { many }))
+    })
+}
+
+/// A slash after an amount: the per-unit words.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("місяць", "на місяць"),
+    ("міс.", "на місяць"),
+    ("міс", "на місяць"),
+    ("тиждень", "на тиждень"),
+    ("день", "на день"),
+    ("добу", "за добу"),
+    ("доба", "за добу"),
+    ("рік", "на рік"),
+    ("год", "на годину"),
+    ("годину", "на годину"),
+    ("ніч", "за ніч"),
+    ("особу", "за особу"),
+    ("ос.", "за особу"),
+    ("шт.", "за штуку"),
+    ("шт", "за штуку"),
+    ("м²", "за квадратний метр"),
+    ("м2", "за квадратний метр"),
+    ("кВт·год", "за кіловат-годину"),
+    ("h", "на годину"),
+    ("кг", "за кілограм"),
+    ("kg", "за кілограм"),
+    ("км", "за кілометр"),
+    ("га", "за гектар"),
+    ("л", "за літр"),
+    ("т", "за тонну"),
+    ("г", "за грам"),
+    ("м", "за метр"),
+];
+
+fn uk_per_unit(t: String, c: &mut Ctx) -> String {
+    let dens = alternation(&PER_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>(), true);
+    let t = c.sub(
+        &rx(&format!(r"{SKIP}(?<![\w.,])({MONEY_SIGN})(\d{{1,3}}(?:[ \xa0]\d{{3}})+|\d+)(,\d{{1,2}})?/(?=[^\W\d_])")),
+        &t,
+        |m| if skipped(m) { None } else { Some(format!("{}{} {}/", g(m, 2), g(m, 3), g(m, 1))) },
+    );
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"{SKIP}(?<=\d)({SP}?(?:{MONEY_CUR}))/({dens})(?![\w²])")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let den = g(m, 2);
+        Some(format!("{} {}{}", g(m, 1), find(PER_UNIT, den)?, drop_dot(den, &s[end(m)..])))
+    })
+}
+
+const SQUARE: &[(&str, [&str; 4])] = &[
+    ("км²", ["квадратний кілометр", "квадратні кілометри", "квадратних кілометрів", "квадратного кілометра"]),
+    ("км2", ["квадратний кілометр", "квадратні кілометри", "квадратних кілометрів", "квадратного кілометра"]),
+    ("м²", ["квадратний метр", "квадратні метри", "квадратних метрів", "квадратного метра"]),
+    ("м2", ["квадратний метр", "квадратні метри", "квадратних метрів", "квадратного метра"]),
+];
+
+fn uk_square(t: String, c: &mut Ctx) -> String {
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"{SKIP}{LB}({NUM})(?:,(\d{{1,3}}))?{SP}?(км²|км2|м²|м2)(?![\w])")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let (num, frac, unit) = (g(m, 1), g(m, 2), g(m, 3));
+        if search(&format!(r"{}{SP}+$", *PREP_RX), &s[..start(m)]) {
+            return None;
+        }
+        let [sg, few, many, gen_sg] = SQUARE.iter().find(|kv| kv.0 == unit)?.1;
+        let n = to_int(num);
+        let out = if frac.is_empty() {
+            counted(n, [sg, few, many, "m"])
+        } else {
+            format!("{} {gen_sg}", decimal(n, frac, NOM))
+        };
+        if words(&m[0], "uk") == out { None } else { Some(out) }
+    })
+}
+
+fn uk_big_number(t: String, c: &mut Ctx) -> String {
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"{SKIP}{LB}(\d{{1,3}}(?:[ \xa0]\d{{3}}){{2,4}}){RB}(?![ \xa0]\d)")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let num = g(m, 1);
+        let n = to_int(num);
+        if n < 1_000_000 {
+            return None;
+        }
+        let rest = &s[end(m)..];
+        let tok = caps(&format!(r"^{SP}?(\S*)"), rest).map(|x| g(&x, 1).to_string()).unwrap_or_default();
+        if (!tok.is_empty() && !plain_word(&tok) && search(r"^[^\W\d_]", &tok)) || search(r"^[%°$€£₴₽]", &tok) {
+            return None;
+        }
+        let out = card(n, NOM, "m");
+        if words(num, "uk") == out { None } else { Some(out) }
+    })
+}
+
+fn uk_grouped_decimal(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"{SKIP}{LB}(\d{{1,3}}(?:[ \xa0]\d{{3}})+),(\d+)(?![\d])")), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        Some(format!("{},{}", g(m, 1).replace([' ', '\u{a0}'], ""), g(m, 2)))
     })
 }

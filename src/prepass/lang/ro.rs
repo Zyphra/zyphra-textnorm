@@ -15,7 +15,13 @@ use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
     ("ro.ordinal-roman", ro_ordinal_roman),
+    ("ro.money-code", ro_money_code),
+    ("ro.money-range", ro_money_range),
+    ("ro.per-unit", ro_per_unit),
+    ("ro.money-cents", ro_money_cents),
     ("ro.scale", ro_scale),
+    ("ro.big", ro_big),
+    ("ro.units", ro_units),
     ("ro.hour", ro_hour),
     ("ro.fraction", ro_fraction),
     ("ro.gender", ro_gender),
@@ -211,6 +217,115 @@ fn ro_ordinal_roman(t: String, c: &mut Ctx) -> String {
 
 // ------------------------------------------------------------------------------------------------ scale words
 
+// ------------------------------------------------------------------------------------------------ money
+
+const INTEGER: &str = r"\d{1,3}(?:\.\d{3})+|\d+";
+const AMT: &str = r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?";
+const SIGN: &str = r"€|\$|£";
+/// Read by the grammar after an amount.
+const CUR: &str = r"€|\$|£|lei|RON|EUR|USD|euro";
+/// The codes the grammar reads after an amount, which it leaves as written before one.
+const CODES_AFTER: &[&str] = &[
+    "RON", "EUR", "USD", "GBP", "CHF", "AUD", "CAD", "JPY", "CNY", "TRY", "UAH", "RUB", "INR", "BRL", "MXN", "ILS",
+    "KRW",
+];
+/// Neighbours' currencies the grammar does not know: code, singular, plural, feminine.
+const LOCAL: &[(&str, &str, &str, bool)] = &[
+    ("MDL", "leu moldovenesc", "lei moldovenești", false),
+    ("HUF", "forint", "forinți", false),
+    ("BGN", "leva", "leva", false),
+    ("RSD", "dinar sârbesc", "dinari sârbești", false),
+    ("PLN", "zlot", "zloți", false),
+    ("CZK", "coroană cehă", "coroane cehe", true),
+];
+
+/// “1 HUF” → “un forint”, “2 CZK” → “două coroane cehe”, “20 HUF” → “douăzeci de forinți” (prototype `counted`).
+fn counted(n: u128, w: &str, fem: bool, one: &str, many: &str) -> String {
+    if n == 1 {
+        return format!("{}{one}", if fem { "o " } else { "un " });
+    }
+    format!("{}{}{many}", if fem { feminine(w, false) } else { w.to_string() }, if needs_de(n) { " de " } else { " " })
+}
+
+fn ro_money_code(t: String, c: &mut Ctx) -> String {
+    let codes = CODES_AFTER.join("|");
+    let t = c.sub(&rx(&format!(r"(?<!\w)({codes}){SP}?({AMT})(?!\w|[.,]\d)")), &t, |m| {
+        Some(format!("{} {}", g(m, 2), g(m, 1)))
+    });
+    let alt = LOCAL.iter().map(|x| x.0).collect::<Vec<_>>().join("|");
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,\-–~])({INTEGER}){SP}?({alt})(?!\w)|(?<!\w)({alt}){SP}?({INTEGER})(?!\w|[.,]\d|{SP}?[-–~])"
+        )),
+        &t,
+        |m| {
+            let num = if m.get(1).is_some() { g(m, 1) } else { g(m, 4) };
+            let code = if m.get(2).is_some() { g(m, 2) } else { g(m, 3) };
+            let &(_, one, many, fem) = LOCAL.iter().find(|x| x.0 == code)?;
+            Some(counted(py_int(&num.replace('.', "")), &words(num, "ro"), fem, one, many))
+        },
+    )
+}
+
+/// An amount as written (“1.200”, “2,5”, “7,50”) in cents, to compare the two ends of a range.
+fn cents_of(a: &str) -> u128 {
+    let (i, d) = a.split_once(',').unwrap_or((a, ""));
+    let dv = if d.is_empty() { 0 } else { py_int(&format!("{d}0")[..2]) };
+    py_int(&i.replace('.', "")).saturating_mul(100).saturating_add(dv)
+}
+
+fn ro_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w$€£])({SIGN}){SP}?({AMT}){SP}?[-–~]{SP}?(?:({SIGN}){SP}?)?({AMT})(?!\w|[.,]\d)")),
+        &t,
+        |m| {
+            let (s, a, s2, b) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+            if (!s2.is_empty() && s2 != s) || cents_of(a) >= cents_of(b) {
+                return None;
+            }
+            Some(if a.contains(',') { format!("{a} {s} până la {b} {s}") } else { format!("{a} până la {b} {s}") })
+        },
+    );
+    c.sub(
+        &rx(&format!(r"(?<![\w.,])({AMT})(?:{SP}?({CUR}))?{SP}?[-–~]{SP}?({AMT})({SP}?)({CUR})(?![\w$€£])")),
+        &t,
+        |m| {
+            let (a, s1, b, sp, s) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5));
+            if (!s1.is_empty() && s1 != s) || cents_of(a) >= cents_of(b) {
+                return None;
+            }
+            Some(if a.contains(',') {
+                format!("{a}{sp}{s} până la {b}{sp}{s}")
+            } else {
+                format!("{a} până la {b}{sp}{s}")
+            })
+        },
+    )
+}
+
+fn ro_per_unit(t: String, c: &mut Ctx) -> String {
+    let amount = format!(r"(?:(?:{SIGN}){SP}?{AMT}|{AMT}{SP}?(?:{CUR}))");
+    c.sub(&rx(&format!(r"(?<![\w.,$€£])({amount})/([^\W\d_]+[²³]?)(?![\w/²³])")), &t, |m| {
+        let tok = g(m, 2);
+        let one = words(&format!("1 {tok}"), "ro");
+        if let Some(rest) = one.strip_prefix("un ").or_else(|| one.strip_prefix("o ")) {
+            if full(&format!("{LETTER}+(?: {LETTER}+)*"), rest) {
+                return Some(format!("{} pe {rest}", g(m, 1)));
+            }
+        }
+        full(r"[a-zăâîșțşţ]+", tok).then(|| format!("{} pe {tok}", g(m, 1)))
+    })
+}
+
+fn ro_money_cents(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({INTEGER}),(\d)({SP}?(?:€|\$|lei|RON|EUR|USD|euro))(?!\w)")), &t, |m| {
+        Some(format!("{},{}0{}", g(m, 1), g(m, 2), g(m, 3)))
+    });
+    c.sub(&rx(&format!(r"(?<![\w$€£])((?:€|\$){SP}?)({INTEGER}),(\d)(?!\w|[.,]\d)")), &t, |m| {
+        Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3)))
+    })
+}
+
 fn ro_scale(t: String, c: &mut Ctx) -> String {
     let re = rx(&format!(r"(?<![\w.,])(\d+(?:,\d+)?){SP}*(mil\.|mln\.?|mld\.|mlrd\.?)(?:({SP}+)({LETTER}+))?"));
     c.sub(&re, &t, |m| {
@@ -227,6 +342,51 @@ fn ro_scale(t: String, c: &mut Ctx) -> String {
 }
 
 // ------------------------------------------------------------------------------------------------ hours
+
+// ------------------------------------------------------------------------------------------------ 10^12 and up
+
+/// A whole number of 13 to 18 digits in thousands of billions (prototype `big_words`).
+fn big_words(d: &str) -> String {
+    let n = py_int(d);
+    let (q, r) = (n / 1_000_000_000, n % 1_000_000_000);
+    let out =
+        format!("{}{} miliarde", feminine(&words(&q.to_string(), "ro"), false), if needs_de(q) { " de" } else { "" });
+    if r != 0 { format!("{out} {}", words(&r.to_string(), "ro")) } else { out }
+}
+
+fn ro_big(t: String, c: &mut Ctx) -> String {
+    let big = r"[1-9]\d{0,2}(?:\.\d{3}){4,5}|[1-9]\d{0,2}(?:[ \x{A0}]\d{3}){4,5}";
+    let re = rx(&format!(
+        r"(?<![\w.,])(?<!\d[ \x{{A0}}])(-?)({big})(?![\w]|[.,]\d|[ \x{{A0}}]\d)(?:({SP}?)({SIGN}|{LETTER}+)(?!\w))?"
+    ));
+    c.sub(&re, &t, |m| {
+        let (minus, n, sp, tok) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+        let d: String = n.chars().filter(|ch| *ch != '.' && *ch != ' ' && *ch != '\u{a0}').collect();
+        let out = format!("{}{}", if minus.is_empty() { "" } else { "minus " }, big_words(&d));
+        if m.get(4).is_none() {
+            return Some(out);
+        }
+        let unit = words(&format!("20 {tok}"), "ro");
+        if let Some(rest) = unit.strip_prefix("douăzeci de ") {
+            if full(&format!("{LETTER}+(?: {LETTER}+)*"), rest) {
+                return Some(format!("{out}{}{rest}", if needs_de(py_int(&d)) { " de " } else { " " }));
+            }
+        }
+        Some(format!("{out}{sp}{tok}"))
+    })
+}
+
+// ------------------------------------------------------------------------------------------------ units
+
+fn ro_units(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"(?<![\w.,\-–~])((?:{INTEGER})(?:,\d+)?){SP}?ha(?!\w)")), &t, |m| {
+        let spoken = words(&format!("{} kg", g(m, 1)), "ro");
+        if let Some(h) = spoken.strip_suffix("kilograme").filter(|h| h.ends_with(' ')) {
+            return Some(format!("{h}hectare"));
+        }
+        spoken.strip_suffix("kilogram").filter(|h| h.ends_with(' ')).map(|h| format!("{h}hectar"))
+    })
+}
 
 fn ro_hour(t: String, c: &mut Ctx) -> String {
     let re =

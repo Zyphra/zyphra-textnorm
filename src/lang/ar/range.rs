@@ -348,7 +348,7 @@ impl Classifier for RangeClassifier<'_> {
             let s: String = (start..candidate.end).map(|i| char_at(text, i)).collect();
             let dash_pos = s.find('-').or_else(|| s.find('–')).expect("recognized range dash");
             let left = s[..dash_pos].trim();
-            let mut right = s[dash_pos + 1..].trim();
+            let mut right = s[dash_pos + s[dash_pos..].chars().next().map_or(1, char::len_utf8)..].trim();
             let left_sym =
                 CURRENCY_SYMBOLS.iter().find(|sym| left.starts_with(sym.as_str())).expect("recognized currency symbol");
             let mut name_sym = left_sym;
@@ -387,7 +387,7 @@ impl Classifier for RangeClassifier<'_> {
             let s: String = (start..candidate.end).map(|i| char_at(text, i)).collect();
             let dash_pos = s.find('-').or_else(|| s.find('–')).expect("recognized range dash");
             let left = s[..dash_pos].trim();
-            let right = s[dash_pos + 1..].trim();
+            let right = s[dash_pos + s[dash_pos..].chars().next().map_or(1, char::len_utf8)..].trim();
             let left_digits = left.bytes().take_while(u8::is_ascii_digit).count();
             let left_end = left_digits
                 + usize::from(
@@ -415,7 +415,10 @@ impl Classifier for RangeClassifier<'_> {
         let s: String = (start..candidate.end).map(|i| char_at(text, i)).collect();
         let dash_pos = s.find('-').or_else(|| s.find('–')).unwrap_or(0);
         let n1_part: String = s[..dash_pos].chars().filter(|c| c.is_ascii_digit()).collect();
-        let n2_part: String = s[dash_pos + 1..].chars().filter(|c| c.is_ascii_digit()).collect();
+        let n2_part: String = s[dash_pos + s[dash_pos..].chars().next().map_or(1, char::len_utf8)..]
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect();
 
         let v1: u64 = n1_part.parse().unwrap_or(0);
         let v2: u64 = n2_part.parse().unwrap_or(0);

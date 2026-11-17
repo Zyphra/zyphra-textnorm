@@ -3,14 +3,26 @@
 use fancy_regex::Captures;
 
 #[allow(unused_imports)]
-use super::super::{Ctx, g, matches_at_start, py_int, rx, tpl};
+use super::super::{Ctx, full, g, matches_at_start, py_int, rx, tpl};
+#[allow(unused_imports)]
+use super::ta::{
+    DR_CODES_MINUS, dr_alt, dr_big, dr_code, dr_cur_word, dr_half_scale, dr_money, dr_money_range, dr_pad, dr_per,
+    dr_scale_case,
+};
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
-    ("kn.minus", kn_minus),
     ("kn.money-abbrev", kn_money_abbrev),
+    ("kn.minus", kn_minus),
+    ("kn.big", kn_big),
+    ("kn.money-code", kn_money_code),
+    ("kn.per", kn_per),
+    ("kn.money-range", kn_money_range),
     ("kn.money-scale", kn_money_scale),
+    ("kn.money-scale-case", kn_money_scale_case),
+    ("kn.half-scale", kn_half_scale),
+    ("kn.units", kn_units),
     ("kn.percent", kn_percent),
     ("kn.range", kn_range),
     ("kn.ordinal-hyphen", kn_ordinal_hyphen),
@@ -119,7 +131,8 @@ fn inflect(spoken: &str, tail: &str) -> String {
 }
 
 fn kn_minus(t: String, c: &mut Ctx) -> String {
-    c.sub_tpl(&rx(&format!(r"(?<![\w.,)\]{KN}-])(?<![0-9] )-(?=[0-9])")), &t, "ಮೈನಸ್ ")
+    let t = c.sub(&rx(r"(?<![\w.,])([₹$€£¥]) ?-(?=[0-9])"), &t, |m| Some(format!("ಮೈನಸ್ {}", g(m, 1))));
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,)\]{KN}-])(?<![0-9] )-(?=[0-9]|{DR_CODES_MINUS})")), &t, "ಮೈನಸ್ ")
 }
 
 fn kn_money_abbrev(t: String, c: &mut Ctx) -> String {
@@ -206,4 +219,169 @@ fn kn_suffix(t: String, c: &mut Ctx) -> String {
 
 fn kn_doctor(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(&format!(r"(?<!\w)Dr\.? (?=[{KN}])")), &t, "ಡಾಕ್ಟರ್ ")
+}
+
+// ------------------------------------------------------------------------------------------------- money (see ta.rs)
+
+const KN_SCALES: &[&str] = &["ಸಾವಿರ", "ಲಕ್ಷ", "ಕೋಟಿ"];
+const KN_HALF_SCALES: &[&str] = &["ಸಾವಿರ", "ಲಕ್ಷ", "ಕೋಟಿ", "ಮಿಲಿಯನ್", "ಬಿಲಿಯನ್"];
+/// Codes the grammar leaves unread (or misreads with decimals): (code, currency, the same, minor unit).
+const KN_CODES: &[(&str, &str, &str, &str)] = &[
+    ("LKR", "ಶ್ರೀಲಂಕಾ ರೂಪಾಯಿ", "ಶ್ರೀಲಂಕಾ ರೂಪಾಯಿ", "ಸೆಂಟ್"),
+    ("QAR", "ಕತಾರ್ ರಿಯಾಲ್", "ಕತಾರ್ ರಿಯಾಲ್", "ದಿರ್ಹಾಮ್"),
+    ("KWD", "ಕುವೈತ್ ದಿನಾರ್", "ಕುವೈತ್ ದಿನಾರ್", ""),
+    ("BHD", "ಬಹ್ರೇನ್ ದಿನಾರ್", "ಬಹ್ರೇನ್ ದಿನಾರ್", ""),
+    ("USD", "ಯುಎಸ್ ಡಾಲರ್", "ಯುಎಸ್ ಡಾಲರ್", "ಸೆಂಟ್"),
+    ("JPY", "ಯೆನ್", "ಯೆನ್", ""),
+    ("CNY", "ಯುವಾನ್", "ಯುವಾನ್", ""),
+    ("KRW", "ವಾನ್", "ವಾನ್", ""),
+    ("IDR", "ಇಂಡೋನೇಷಿಯನ್ ರೂಪಾಯಿ", "ಇಂಡೋನೇಷಿಯನ್ ರೂಪಾಯಿ", ""),
+];
+const KN_SIGNS: &[(&str, &str)] = &[("¥", "JPY"), ("₩", "KRW")];
+const KN_PER: &[(&str, &str)] = &[
+    ("ತಿಂಗಳು", "ತಿಂಗಳಿಗೆ"),
+    ("ವರ್ಷ", "ವರ್ಷಕ್ಕೆ"),
+    ("ದಿನ", "ದಿನಕ್ಕೆ"),
+    ("ವಾರ", "ವಾರಕ್ಕೆ"),
+    ("ಗಂಟೆ", "ಗಂಟೆಗೆ"),
+    ("ಕೆಜಿ", "ಕೆಜಿಗೆ"),
+    ("ಕಿಲೋ", "ಕಿಲೋಗೆ"),
+    ("ಗ್ರಾಂ", "ಗ್ರಾಂಗೆ"),
+    ("ಲೀಟರ್", "ಲೀಟರ್\u{200c}ಗೆ"),
+    ("ಮೀಟರ್", "ಮೀಟರ್\u{200c}ಗೆ"),
+    ("ವ್ಯಕ್ತಿ", "ವ್ಯಕ್ತಿಗೆ"),
+    ("ರಾತ್ರಿ", "ರಾತ್ರಿಗೆ"),
+    ("ಯೂನಿಟ್", "ಯೂನಿಟ್\u{200c}ಗೆ"),
+    ("ಚದರ ಅಡಿ", "ಚದರ ಅಡಿಗೆ"),
+    ("ಎಕರೆ", "ಎಕರೆಗೆ"),
+    ("ಟನ್", "ಟನ್\u{200c}ಗೆ"),
+    ("ಕ್ವಿಂಟಲ್", "ಕ್ವಿಂಟಲ್\u{200c}ಗೆ"),
+    ("L", "ಲೀಟರ್\u{200c}ಗೆ"),
+    ("kWh", "ಕಿಲೋವ್ಯಾಟ್ ಗಂಟೆಗೆ"),
+    ("unit", "ಯೂನಿಟ್\u{200c}ಗೆ"),
+    ("sqft", "ಚದರ ಅಡಿಗೆ"),
+    ("sq ft", "ಚದರ ಅಡಿಗೆ"),
+    ("sq.ft", "ಚದರ ಅಡಿಗೆ"),
+    ("sq. ft", "ಚದರ ಅಡಿಗೆ"),
+    ("m²", "ಚದರ ಮೀಟರ್\u{200c}ಗೆ"),
+    ("t", "ಟನ್\u{200c}ಗೆ"),
+    ("qtl", "ಕ್ವಿಂಟಲ್\u{200c}ಗೆ"),
+    ("acre", "ಎಕರೆಗೆ"),
+    ("piece", "ಒಂದಕ್ಕೆ"),
+    ("pc", "ಒಂದಕ್ಕೆ"),
+    ("person", "ವ್ಯಕ್ತಿಗೆ"),
+    ("night", "ರಾತ್ರಿಗೆ"),
+    ("week", "ವಾರಕ್ಕೆ"),
+    ("kg", "ಕಿಲೋಗ್ರಾಂಗೆ"),
+    ("km", "ಕಿಲೋಮೀಟರ್\u{200c}ಗೆ"),
+    ("m", "ಮೀಟರ್\u{200c}ಗೆ"),
+    ("hr", "ಗಂಟೆಗೆ"),
+    ("h", "ಗಂಟೆಗೆ"),
+    ("day", "ದಿನಕ್ಕೆ"),
+    ("month", "ತಿಂಗಳಿಗೆ"),
+    ("year", "ವರ್ಷಕ್ಕೆ"),
+    ("l", "ಲೀಟರ್\u{200c}ಗೆ"),
+    ("g", "ಗ್ರಾಂಗೆ"),
+];
+const KN_UNITS: &[(&str, &str)] = &[
+    ("sq ft", "ಚದರ ಅಡಿ"),
+    ("sq.ft", "ಚದರ ಅಡಿ"),
+    ("sq. ft", "ಚದರ ಅಡಿ"),
+    ("sqft", "ಚದರ ಅಡಿ"),
+    ("acres", "ಎಕರೆ"),
+    ("acre", "ಎಕರೆ"),
+];
+const KN_ARAB: &[&str] = &["ಅರಬ್", "ಖರಬ್"];
+
+/// N and a half: 2 -> ಎರಡೂವರೆ, 25 -> ಇಪ್ಪತ್ತೈದೂವರೆ.
+fn kn_and_half(n: u128) -> Option<String> {
+    let sp = plain(&n.to_string())?;
+    if !sp.ends_with('\u{0CC1}') {
+        return None;
+    }
+    Some(format!("{}\u{0CC2}ವರೆ", drop_last(&sp)))
+}
+
+fn kn_amount(x: &str, scale: bool) -> Option<String> {
+    if scale && full(r"[1-9][0-9]?\.5", x) {
+        return kn_and_half(py_int(&x[..x.len() - 2]));
+    }
+    plain(x)
+}
+
+/// The ablative on the last word: ಐದು -> ಐದರಿಂದ, ಸಾವಿರ -> ಸಾವಿರದಿಂದ, ಪೈಸೆ -> ಪೈಸೆಯಿಂದ, a loanword ending in a consonant
+/// with ನಿಂದ (ಸೆಂಟ್ -> ಸೆಂಟ್\u{200c}ನಿಂದ).
+fn kn_from(sp: &str) -> String {
+    if sp.ends_with('\u{0CCD}') {
+        return format!("{sp}\u{200c}ನಿಂದ");
+    }
+    inflect(sp, "ರಿಂದ")
+}
+
+/// The first amount takes the ablative ರಿಂದ (ಐದರಿಂದ ಹತ್ತು ಡಾಲರ್), as kn.range reads 5-10.
+fn kn_compose(a: &str, b: &str, cur: &str, after: bool, scale: &str) -> Option<String> {
+    if !scale.is_empty() {
+        let (aw, bw, cw) = (kn_amount(a, true)?, kn_amount(b, true)?, dr_cur_word(cur, after, "kn")?);
+        return Some(format!("{} {bw} {scale} {cw}", kn_from(&aw)));
+    }
+    let aw = if a.contains('.') { words(&dr_money(cur, &dr_pad(a), after), "kn") } else { plain(a)? };
+    Some(format!("{} {}", kn_from(&aw), words(&dr_money(cur, &dr_pad(b), after), "kn")))
+}
+
+fn kn_big(t: String, c: &mut Ctx) -> String {
+    dr_big(t, c, "kn", |_| "ಕೋಟಿ", "ಕೋಟಿ", "ಕೋಟಿ", ("ಲಕ್ಷ", "ಲಕ್ಷ"), KN_ARAB)
+}
+
+fn kn_money_code(t: String, c: &mut Ctx) -> String {
+    dr_code(t, c, "kn", KN_CODES, KN_SIGNS, &["ರೂಪಾಯಿ"], "ಪೈಸೆ", plain, |s| s.to_string())
+}
+
+fn kn_per(t: String, c: &mut Ctx) -> String {
+    dr_per(t, c, KN_PER, KN_SCALES, &["ರೂಪಾಯಿ"], KN)
+}
+
+fn kn_money_range(t: String, c: &mut Ctx) -> String {
+    dr_money_range(t, c, KN_SCALES, KN, kn_compose)
+}
+
+fn kn_half_scale(t: String, c: &mut Ctx) -> String {
+    dr_half_scale(t, c, KN_HALF_SCALES, kn_and_half)
+}
+
+fn kn_units(t: String, c: &mut Ctx) -> String {
+    let keys: Vec<&str> = KN_UNITS.iter().map(|&(k, _)| k).collect();
+    let pat = format!(r"(?<=[0-9]) ?({})(?:\.(?= [^\W\d_]))?(?![A-Za-z])", dr_alt(&keys));
+    c.sub(&rx(&pat), &t, |m| KN_UNITS.iter().find(|&&(k, _)| k == g(m, 1)).map(|&(_, w)| format!(" {w}")))
+}
+
+/// A scale word with a case ending after a rupee amount: (as written, the bare scale word, the rupee word with the ending).
+const KN_SCALE_CASE: &[(&str, &str, &str)] = &[
+    ("ಕೋಟಿಗೆ", "ಕೋಟಿ", "ರೂಪಾಯಿಗೆ"),
+    ("ಕೋಟಿಯ", "ಕೋಟಿ", "ರೂಪಾಯಿಯ"),
+    ("ಕೋಟಿಯಲ್ಲಿ", "ಕೋಟಿ", "ರೂಪಾಯಿಯಲ್ಲಿ"),
+    ("ಕೋಟಿಯಿಂದ", "ಕೋಟಿ", "ರೂಪಾಯಿಯಿಂದ"),
+    ("ಕೋಟಿಯಷ್ಟು", "ಕೋಟಿ", "ರೂಪಾಯಿಯಷ್ಟು"),
+    ("ಕೋಟಿಯವರೆಗೆ", "ಕೋಟಿ", "ರೂಪಾಯಿಯವರೆಗೆ"),
+    ("ಕೋಟಿಗಿಂತ", "ಕೋಟಿ", "ರೂಪಾಯಿಗಿಂತ"),
+    ("ಕೋಟಿಗೂ", "ಕೋಟಿ", "ರೂಪಾಯಿಗೂ"),
+    ("ಲಕ್ಷಕ್ಕೆ", "ಲಕ್ಷ", "ರೂಪಾಯಿಗೆ"),
+    ("ಲಕ್ಷದ", "ಲಕ್ಷ", "ರೂಪಾಯಿಯ"),
+    ("ಲಕ್ಷದಲ್ಲಿ", "ಲಕ್ಷ", "ರೂಪಾಯಿಯಲ್ಲಿ"),
+    ("ಲಕ್ಷದಿಂದ", "ಲಕ್ಷ", "ರೂಪಾಯಿಯಿಂದ"),
+    ("ಲಕ್ಷದಷ್ಟು", "ಲಕ್ಷ", "ರೂಪಾಯಿಯಷ್ಟು"),
+    ("ಲಕ್ಷದವರೆಗೆ", "ಲಕ್ಷ", "ರೂಪಾಯಿಯವರೆಗೆ"),
+    ("ಲಕ್ಷಕ್ಕಿಂತ", "ಲಕ್ಷ", "ರೂಪಾಯಿಗಿಂತ"),
+    ("ಲಕ್ಷಕ್ಕೂ", "ಲಕ್ಷ", "ರೂಪಾಯಿಗೂ"),
+    ("ಸಾವಿರಕ್ಕೆ", "ಸಾವಿರ", "ರೂಪಾಯಿಗೆ"),
+    ("ಸಾವಿರದ", "ಸಾವಿರ", "ರೂಪಾಯಿಯ"),
+    ("ಸಾವಿರದಲ್ಲಿ", "ಸಾವಿರ", "ರೂಪಾಯಿಯಲ್ಲಿ"),
+    ("ಸಾವಿರದಿಂದ", "ಸಾವಿರ", "ರೂಪಾಯಿಯಿಂದ"),
+    ("ಸಾವಿರದಷ್ಟು", "ಸಾವಿರ", "ರೂಪಾಯಿಯಷ್ಟು"),
+    ("ಸಾವಿರದವರೆಗೆ", "ಸಾವಿರ", "ರೂಪಾಯಿಯವರೆಗೆ"),
+    ("ಸಾವಿರಕ್ಕಿಂತ", "ಸಾವಿರ", "ರೂಪಾಯಿಗಿಂತ"),
+    ("ಸಾವಿರಕ್ಕೂ", "ಸಾವಿರ", "ರೂಪಾಯಿಗೂ"),
+];
+
+fn kn_money_scale_case(t: String, c: &mut Ctx) -> String {
+    dr_scale_case(t, c, KN_SCALE_CASE, KN)
 }

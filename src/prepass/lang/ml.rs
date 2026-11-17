@@ -1,13 +1,26 @@
 //! 'ml' rules: the port of the workbench's `langrules/ml.py` (ids `ml.*`).
 
 #[allow(unused_imports)]
-use super::super::{Ctx, g, py_int, rx, tpl};
+use super::super::{Ctx, full, g, py_int, rx, tpl};
+#[allow(unused_imports)]
+use super::ta::{
+    dr_alt, dr_big, dr_code, dr_cur_word, dr_half_scale, dr_money, dr_money_range, dr_pad, dr_per, dr_scale_case,
+    dr_sign_minus,
+};
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
     ("ml.money-abbrev", ml_money_abbrev),
+    ("ml.money-minus", ml_money_minus),
+    ("ml.big", ml_big),
+    ("ml.money-code", ml_money_code),
+    ("ml.per", ml_per),
+    ("ml.money-range", ml_money_range),
     ("ml.money-scale", ml_money_scale),
+    ("ml.money-scale-case", ml_money_scale_case),
+    ("ml.half-scale", ml_half_scale),
+    ("ml.units", ml_units),
     ("ml.half", ml_half),
     ("ml.range", ml_range),
     ("ml.thousands", ml_thousands),
@@ -108,6 +121,7 @@ const ONE_NOUNS: &[&str] = &[
     "ഡോളർ",
     "സ്ഥല",
     "ഭാഗ",
+    "ചതുരശ്ര",
 ];
 
 /// `"|".join(sorted(keys, key=len, reverse=True))`: longest first, ties in table order.
@@ -330,4 +344,183 @@ fn ml_one(t: String, c: &mut Ctx) -> String {
 
 fn ml_doctor(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(&format!(r"(?<!\w)Dr\.? (?=[{ML}])")), &t, "ഡോക്ടർ ")
+}
+
+// ------------------------------------------------------------------------------------------------- money (see ta.rs)
+
+const ML_SCALES: &[&str] = &["ആയിരം", "ലക്ഷം", "കോടി"];
+const ML_HALF_SCALES: &[&str] = &["ആയിര", "ലക്ഷ", "കോടി", "ദശലക്ഷ", "മില്യൺ", "ബില്യൺ"];
+/// Codes the grammar leaves unread (or unread with decimals): (code, currency, the same, minor unit).
+const ML_CODES: &[(&str, &str, &str, &str)] = &[
+    ("AED", "ദിർഹം", "ദിർഹം", "ഫിൽസ്"),
+    ("SAR", "സൗദി റിയാൽ", "സൗദി റിയാൽ", "ഹലാല"),
+    ("QAR", "ഖത്തർ റിയാൽ", "ഖത്തർ റിയാൽ", "ദിർഹം"),
+    ("KWD", "കുവൈത്ത് ദിനാർ", "കുവൈത്ത് ദിനാർ", ""),
+    ("OMR", "ഒമാനി റിയാൽ", "ഒമാനി റിയാൽ", ""),
+    ("BHD", "ബഹ്റൈൻ ദിനാർ", "ബഹ്റൈൻ ദിനാർ", ""),
+    ("LKR", "ശ്രീലങ്കൻ രൂപ", "ശ്രീലങ്കൻ രൂപ", "സെന്റ്"),
+    ("PKR", "പാകിസ്ഥാനി രൂപ", "പാകിസ്ഥാനി രൂപ", "പൈസ"),
+    ("BDT", "ബംഗ്ലാദേശി ടാക്ക", "ബംഗ്ലാദേശി ടാക്ക", "പൈസ"),
+    ("SGD", "സിംഗപ്പൂർ ഡോളർ", "സിംഗപ്പൂർ ഡോളർ", "സെന്റ്"),
+    ("MYR", "മലേഷ്യൻ റിംഗിറ്റ്", "മലേഷ്യൻ റിംഗിറ്റ്", "സെൻ"),
+    ("HKD", "ഹോങ്കോങ് ഡോളർ", "ഹോങ്കോങ് ഡോളർ", "സെന്റ്"),
+    ("NZD", "ന്യൂസിലൻഡ് ഡോളർ", "ന്യൂസിലൻഡ് ഡോളർ", "സെന്റ്"),
+    ("AUD", "ഓസ്ട്രേലിയൻ ഡോളർ", "ഓസ്ട്രേലിയൻ ഡോളർ", "സെന്റ്"),
+    ("CAD", "കനേഡിയൻ ഡോളർ", "കനേഡിയൻ ഡോളർ", "സെന്റ്"),
+    ("CHF", "സ്വിസ് ഫ്രാങ്ക്", "സ്വിസ് ഫ്രാങ്ക്", "സെന്റീം"),
+    ("ZAR", "ദക്ഷിണാഫ്രിക്കൻ റാൻഡ്", "ദക്ഷിണാഫ്രിക്കൻ റാൻഡ്", "സെന്റ്"),
+    ("RUB", "റഷ്യൻ റൂബിൾ", "റഷ്യൻ റൂബിൾ", "കോപെക്ക്"),
+    ("THB", "തായ് ബട്ട്", "തായ് ബട്ട്", "സതാങ്"),
+    ("INR", "രൂപ", "രൂപ", "പൈസ"),
+    ("CNY", "ചൈനീസ് യുവാൻ", "ചൈനീസ് യുവാൻ", ""),
+    ("JPY", "യെൻ", "യെൻ", ""),
+    ("KRW", "ദക്ഷിണ കൊറിയൻ വോൺ", "ദക്ഷിണ കൊറിയൻ വോൺ", ""),
+    ("IDR", "ഇന്തോനേഷ്യൻ റുപിയ", "ഇന്തോനേഷ്യൻ റുപിയ", ""),
+];
+const ML_SIGNS: &[(&str, &str)] = &[("₨", "INR"), ("₽", "RUB"), ("฿", "THB"), ("৳", "BDT"), ("¥", "JPY"), ("₩", "KRW")];
+/// The per phrase comes first: a time word as it is (മാസം നൂറ് യൂറോ), a unit in the dative (കിലോയ്ക്ക്, ലിറ്ററിന്).
+const ML_PER: &[(&str, &str)] = &[
+    ("മാസം", "മാസം"),
+    ("വർഷം", "വർഷം"),
+    ("ദിവസം", "ദിവസം"),
+    ("ആഴ്ച", "ആഴ്ചയിൽ"),
+    ("മണിക്കൂർ", "മണിക്കൂറിന്"),
+    ("കിലോ", "കിലോയ്ക്ക്"),
+    ("ഗ്രാം", "ഗ്രാമിന്"),
+    ("ലിറ്റർ", "ലിറ്ററിന്"),
+    ("മീറ്റർ", "മീറ്ററിന്"),
+    ("ആൾ", "ആൾക്ക്"),
+    ("രാത്രി", "രാത്രിക്ക്"),
+    ("യൂണിറ്റ്", "യൂണിറ്റിന്"),
+    ("ചതുരശ്ര അടി", "ചതുരശ്ര അടിക്ക്"),
+    ("സെന്റ്", "സെന്റിന്"),
+    ("ഏക്കർ", "ഏക്കറിന്"),
+    ("ടൺ", "ടണ്ണിന്"),
+    ("ക്വിന്റൽ", "ക്വിന്റലിന്"),
+    ("kg", "കിലോഗ്രാമിന്"),
+    ("g", "ഗ്രാമിന്"),
+    ("l", "ലിറ്ററിന്"),
+    ("L", "ലിറ്ററിന്"),
+    ("km", "കിലോമീറ്ററിന്"),
+    ("m", "മീറ്ററിന്"),
+    ("hr", "മണിക്കൂറിന്"),
+    ("h", "മണിക്കൂറിന്"),
+    ("day", "ദിവസം"),
+    ("month", "മാസം"),
+    ("mo", "മാസം"),
+    ("year", "വർഷം"),
+    ("yr", "വർഷം"),
+    ("week", "ആഴ്ചയിൽ"),
+    ("kWh", "കിലോവാട്ട് മണിക്കൂറിന്"),
+    ("unit", "യൂണിറ്റിന്"),
+    ("sqft", "ചതുരശ്ര അടിക്ക്"),
+    ("sq ft", "ചതുരശ്ര അടിക്ക്"),
+    ("sq.ft", "ചതുരശ്ര അടിക്ക്"),
+    ("sq. ft", "ചതുരശ്ര അടിക്ക്"),
+    ("m²", "ചതുരശ്ര മീറ്ററിന്"),
+    ("t", "ടണ്ണിന്"),
+    ("qtl", "ക്വിന്റലിന്"),
+    ("acre", "ഏക്കറിന്"),
+    ("cent", "സെന്റിന്"),
+    ("piece", "ഒന്നിന്"),
+    ("pc", "ഒന്നിന്"),
+    ("person", "ഒരാൾക്ക്"),
+    ("night", "രാത്രിക്ക്"),
+];
+const ML_UNITS: &[(&str, &str)] = &[
+    ("sq ft", "ചതുരശ്ര അടി"),
+    ("sq.ft", "ചതുരശ്ര അടി"),
+    ("sq. ft", "ചതുരശ്ര അടി"),
+    ("sqft", "ചതുരശ്ര അടി"),
+    ("acres", "ഏക്കർ"),
+    ("acre", "ഏക്കർ"),
+];
+const ML_ARAB: &[&str] = &["അറബ്", "ഖറബ്"];
+
+/// N and a half: 2 -> രണ്ടര, 1 -> ഒന്നര, 25 -> ഇരുപത്തിയഞ്ചര.
+fn ml_and_half(n: u128) -> Option<String> {
+    let sp = plain(&n.to_string())?;
+    if !sp.ends_with(VIRAMA) {
+        return None;
+    }
+    Some(format!("{}ര", drop_last(&sp)))
+}
+
+fn ml_amount(x: &str, scale: bool) -> Option<String> {
+    if scale && full(r"[1-9][0-9]?\.5", x) {
+        return ml_and_half(py_int(&x[..x.len() - 2]));
+    }
+    plain(x)
+}
+
+/// Each amount with its currency, മുതൽ … വരെ, as the grammar reads $5-$10; with a scale word the currency once.
+fn ml_compose(a: &str, b: &str, cur: &str, after: bool, scale: &str) -> Option<String> {
+    if !scale.is_empty() {
+        let (aw, bw, cw) = (ml_amount(a, true)?, ml_amount(b, true)?, dr_cur_word(cur, after, "ml")?);
+        return Some(format!("{aw} മുതൽ {bw} {scale} {cw} വരെ"));
+    }
+    Some(format!(
+        "{} മുതൽ {} വരെ",
+        thousands(&words(&dr_money(cur, &dr_pad(a), after), "ml")),
+        thousands(&words(&dr_money(cur, &dr_pad(b), after), "ml"))
+    ))
+}
+
+fn ml_money_minus(t: String, c: &mut Ctx) -> String {
+    dr_sign_minus(t, c, "-")
+}
+
+fn ml_big(t: String, c: &mut Ctx) -> String {
+    dr_big(t, c, "ml", |_| "കോടി", "കോടി", "കോടി", ("ലക്ഷം", "ലക്ഷത്തി"), ML_ARAB)
+}
+
+fn ml_money_code(t: String, c: &mut Ctx) -> String {
+    dr_code(t, c, "ml", ML_CODES, ML_SIGNS, &["രൂപ"], "പൈസ", plain, thousands)
+}
+
+fn ml_per(t: String, c: &mut Ctx) -> String {
+    dr_per(t, c, ML_PER, ML_SCALES, &["രൂപ"], ML)
+}
+
+fn ml_money_range(t: String, c: &mut Ctx) -> String {
+    dr_money_range(t, c, ML_SCALES, ML, ml_compose)
+}
+
+fn ml_half_scale(t: String, c: &mut Ctx) -> String {
+    dr_half_scale(t, c, ML_HALF_SCALES, ml_and_half)
+}
+
+fn ml_units(t: String, c: &mut Ctx) -> String {
+    let keys: Vec<&str> = ML_UNITS.iter().map(|&(k, _)| k).collect();
+    let pat = format!(r"(?<=[0-9]) ?({})(?:\.(?= [^\W\d_]))?(?![A-Za-z])", dr_alt(&keys));
+    c.sub(&rx(&pat), &t, |m| ML_UNITS.iter().find(|&&(k, _)| k == g(m, 1)).map(|&(_, w)| format!(" {w}")))
+}
+
+/// A scale word with a case ending after a rupee amount: (as written, the bare scale word, the rupee word with the ending).
+const ML_SCALE_CASE: &[(&str, &str, &str)] = &[
+    ("കോടിക്ക്", "കോടി", "രൂപയ്ക്ക്"),
+    ("കോടിക്കും", "കോടി", "രൂപയ്ക്കും"),
+    ("കോടിയുടെ", "കോടി", "രൂപയുടെ"),
+    ("കോടിയിൽ", "കോടി", "രൂപയിൽ"),
+    ("കോടിയോളം", "കോടി", "രൂപയോളം"),
+    ("കോടിയും", "കോടി", "രൂപയും"),
+    ("കോടിയാണ്", "കോടി", "രൂപയാണ്"),
+    ("ലക്ഷത്തിന്", "ലക്ഷം", "രൂപയ്ക്ക്"),
+    ("ലക്ഷത്തിനും", "ലക്ഷം", "രൂപയ്ക്കും"),
+    ("ലക്ഷത്തിന്റെ", "ലക്ഷം", "രൂപയുടെ"),
+    ("ലക്ഷത്തിൽ", "ലക്ഷം", "രൂപയിൽ"),
+    ("ലക്ഷത്തോളം", "ലക്ഷം", "രൂപയോളം"),
+    ("ലക്ഷവും", "ലക്ഷം", "രൂപയും"),
+    ("ലക്ഷമാണ്", "ലക്ഷം", "രൂപയാണ്"),
+    ("ആയിരത്തിന്", "ആയിരം", "രൂപയ്ക്ക്"),
+    ("ആയിരത്തിനും", "ആയിരം", "രൂപയ്ക്കും"),
+    ("ആയിരത്തിന്റെ", "ആയിരം", "രൂപയുടെ"),
+    ("ആയിരത്തിൽ", "ആയിരം", "രൂപയിൽ"),
+    ("ആയിരത്തോളം", "ആയിരം", "രൂപയോളം"),
+    ("ആയിരവും", "ആയിരം", "രൂപയും"),
+    ("ആയിരമാണ്", "ആയിരം", "രൂപയാണ്"),
+];
+
+fn ml_money_scale_case(t: String, c: &mut Ctx) -> String {
+    dr_scale_case(t, c, ML_SCALE_CASE, ML)
 }

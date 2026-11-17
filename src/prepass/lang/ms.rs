@@ -6,6 +6,8 @@ use super::super::{Ctx, g, py_int, rx, tpl};
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("ms.money", ms_money),
+    ("ms.per", ms_per),
     ("ms.regnal", ms_regnal),
     ("ms.place-abbrev", ms_place_abbrev),
     ("ms.chat-abbrev", ms_chat_abbrev),
@@ -96,5 +98,35 @@ fn ms_time(t: String, c: &mut Ctx) -> String {
             return None;
         }
         Some(format!("{}{} {}", g(m, 1), words(&h.to_string(), "ms"), words(&mm.to_string(), "ms")))
+    })
+}
+
+// ------------------------------------------------------------------------------------------------- money (Nov 16)
+
+/// Signs and codes with a minor unit.
+const SIGN: &str = r"(?:[€$£]|(?<![A-Za-z])(?:RM|S\$|USD|EUR|GBP|MYR|SGD)(?![A-Za-z]) ?)";
+const SIGN_ANY: &str =
+    r"(?:[€$£¥]|(?<![A-Za-z])(?:RM|Rp|S\$|USD|EUR|GBP|MYR|SGD|IDR|JPY|CNY|AUD|HKD|THB)(?![A-Za-z]) ?)";
+const CUR_AFTER: &str = r"(?:[€$£]|(?:RM|USD|EUR|GBP|MYR|SGD)(?![A-Za-z]))";
+const SCALE: &str = r"(?![A-Za-z]| ?(?:ribu|juta|miliar|bilion|billion|trilion|triliun|rb|jt)(?!\w))";
+
+fn ms_money(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,])({SIGN}\d+(?:[.,]\d{{3}})*)([.,])(\d)(?![\d.,]\d|\d){SCALE}");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}{}{}0", g(m, 1), g(m, 2), g(m, 3))));
+    let pat =
+        format!(r"(?<![\w.,])(?<!\d[\-–—~～〜])(?<!\d [\-–—~～〜])(\d+(?:[.,]\d{{3}})*)([.,])(\d)( ?{CUR_AFTER})");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}{}{}0{}", g(m, 1), g(m, 2), g(m, 3), g(m, 4))));
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,])({SIGN_ANY}?\d[\d.,]*) ?[~～〜] ?(?={SIGN_ANY}?\d)")), &t, r"\1-")
+}
+
+fn ms_per(t: String, c: &mut Ctx) -> String {
+    let money = format!(
+        r"(?<![\w.,])({SIGN_ANY}\d[\d.,]*(?: ?(?:ribu|juta|rb|jt))?|\d[\d.,]* ?(?:{SIGN_ANY}|(?:ringgit|euro|dolar|rupiah|sen|ribu|juta|rb|jt)(?!\w)))"
+    );
+    c.sub(&rx(&format!(r"{money} ?/ ?([^\W\d_]+)")), &t, |m| {
+        if !words(&m[0], "ms").contains('/') {
+            return None; // the grammar reads it (100 €/bulan → seratus euro per bulan)
+        }
+        Some(format!("{} per {}", g(m, 1), g(m, 2)))
     })
 }

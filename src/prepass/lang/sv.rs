@@ -5,8 +5,10 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use super::super::{Ctx, g, py_int, py_int_str, rx};
-use super::da::{YearCues, abbrev_rule, nordic_year, set};
+use super::super::{Ctx, g, matches_at_start, py_int, py_int_str, rx, search};
+use super::da::{
+    YearCues, abbrev_rule, kroner_code, money_decimal, money_range, nordic_year, per_unit, set, unit_groups,
+};
 use super::{LangRule, words};
 
 pub(super) const RULES: &[LangRule] = &[
@@ -14,11 +16,20 @@ pub(super) const RULES: &[LangRule] = &[
     ("sv.quarter", sv_quarter),
     ("sv.date-slash", sv_date_slash),
     ("sv.kronor", sv_kronor),
+    ("sv.money-groups", sv_money_groups),
+    ("sv.money-range", sv_money_range),
+    ("sv.sek", sv_sek),
+    ("sv.money-decimal", sv_money_decimal),
+    ("sv.money-code", sv_money_code),
+    ("sv.per-unit", sv_per_unit),
     ("sv.scale", sv_scale),
     ("sv.units", sv_units),
+    ("sv.ordinal", sv_ordinal),
+    ("sv.en-miljon", sv_en_miljon),
     ("sv.abbrev", sv_abbrev),
     ("sv.regnal", sv_regnal),
     ("sv.year", sv_year),
+    ("sv.unit-groups", sv_unit_groups),
 ];
 
 // ---------------------------------------------------------------------------------------------- halves (S01, S16)
@@ -103,6 +114,40 @@ fn sv_kronor(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(r"(\d) ?:[-–](?![\w-])"), &t, r"\1 kr")
 }
 
+fn sv_sek(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(r"(\d) ?SEK(?!\w)"), &t, r"\1 kr")
+}
+
+const SV_CUR: &str = r"US\$|SEK|NOK|DKK|ISK|USD|EUR|GBP|CHF|JPY|kr|\$|€|£|¥";
+const SV_NUM: &str = r"(?:[1-9]\d{0,2}(?:[ \x{A0}]\d{3})+|\d+)(?:,\d{1,2})?";
+
+const SV_DOT_GROUPED: &str = r"[1-9]\d{0,2}(?:\.\d{3})+";
+
+fn sv_money_groups(t: String, c: &mut Ctx) -> String {
+    let p = format!(r"(?<!\w)({SV_CUR}) ?({SV_DOT_GROUPED})(?=(?:,\d\d)?(?![\w]|[.,]\d|[ \x{{A0}}]\d))");
+    let t = c.sub(&rx(&p), &t, |m| Some(format!("{} {}", g(m, 1), g(m, 2).replace('.', ""))));
+    let p = format!(r"(?<![\w.,])(?<!\d[ \x{{A0}}])({SV_DOT_GROUPED})(?=(?:,\d\d)? ?(?:{SV_CUR}|kronor|euro)(?!\w))");
+    c.sub(&rx(&p), &t, |m| Some(g(m, 1).replace('.', "")))
+}
+
+fn sv_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, SV_CUR)
+}
+
+fn sv_money_decimal(t: String, c: &mut Ctx) -> String {
+    money_decimal(t, c, &format!("{SV_CUR}|kronor|euro"), SV_CUR, SV_NUM, "till", false)
+}
+
+fn sv_money_code(t: String, c: &mut Ctx) -> String {
+    kroner_code(t, c, "sv", &[("NOK", ("norsk", "norska"))], "kr", r"\bkrona\b", r"\bkronor\b", SV_NUM, r"[ \x{A0}]")
+}
+
+const SV_PER: &[(&str, &str)] = &[("timme", "per timme"), ("dygn", "per dygn")];
+
+fn sv_per_unit(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, SV_CUR, SV_PER)
+}
+
 fn sv_scale(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![\w.,])(\d+(?:,\d+)?) ?(mdr|md|milj|mn)(?:(\.)|(?![\w-]))"), &t, |m| {
         let (num, abbr, dot) = (g(m, 1), g(m, 2), g(m, 3));
@@ -115,6 +160,89 @@ fn sv_scale(t: String, c: &mut Ctx) -> String {
 
 fn sv_units(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(r"(\d ?)kvm\b\.?"), &t, r"\1m²")
+}
+
+/// The singular scale words; the grammar's plain cardinal drops the "en" before them (1 000 000 → miljon).
+const SV_SCALE_ONE: [&str; 6] = ["miljon", "miljard", "biljon", "biljard", "triljon", "triljard"];
+
+/// 'miljon femhundratusen' -> 'en miljon femhundratusen', 'två miljarder miljon' -> 'två miljarder en miljon'.
+fn sv_one_scale(w: &str) -> String {
+    let toks: Vec<&str> = w.split(' ').collect();
+    let mut out: Vec<&str> = Vec::with_capacity(toks.len() + 2);
+    for (i, tok) in toks.iter().enumerate() {
+        if SV_SCALE_ONE.contains(tok) && (i == 0 || !matches!(toks[i - 1], "en" | "ett")) {
+            out.push("en");
+        }
+        out.push(tok);
+    }
+    out.join(" ")
+}
+
+const SV_ORD_SCALE: [(&str, &str); 4] = [
+    (r"tusen$", "tusende"),
+    (r"miljon(?:er)?$", "miljonte"),
+    (r"miljard(?:er)?$", "miljardte"),
+    (r"biljon(?:er)?$", "biljonte"),
+];
+
+/// 2001, 'a' -> 'tvåtusen första'; 10000, 'e' -> 'tiotusende'; 2000000, 'e' -> 'två miljonte' (the grammar's
+/// spacing); None when it cannot be built.
+fn sv_ordinal_words(n: u128, suf: &str) -> Option<String> {
+    let r = n % 1000;
+    let out = if r != 0 {
+        format!("{} {}", words(&(n - r).to_string(), "sv"), words(&format!("{r}:{suf}"), "sv"))
+    } else {
+        let w = words(&n.to_string(), "sv");
+        let (pat, rep) = SV_ORD_SCALE.iter().find(|(pat, _)| search(pat, &w))?;
+        rx(pat).replace_all(&w, *rep).to_string()
+    };
+    if search(r"\d|(?:^|\s)[ae]$", &out) { None } else { Some(out) }
+}
+
+fn sv_ordinal(t: String, c: &mut Ctx) -> String {
+    let p = r"(?<![\w.,:/+−-])(?<!\d[ \x{A0}])([1-9]\d{0,2}(?:[ \x{A0}]\d{3})+|[1-9]\d*):([ae])(?!\w)";
+    c.sub(&rx(p), &t, |m| {
+        let (num, suf) = (g(m, 1), g(m, 2));
+        let plain: String = num.chars().filter(|&ch| !matches!(ch, ' ' | '\u{a0}')).collect();
+        let w = words(&format!("{plain}:{suf}"), "sv");
+        if !search(r"\d|(?:^|\s)[ae]$", &w) {
+            return if plain == num { None } else { Some(format!("{plain}:{suf}")) };
+        }
+        sv_ordinal_words(py_int(&plain), suf)
+    })
+}
+
+fn sv_en_miljon(t: String, c: &mut Ctx) -> String {
+    let pat = r#"(?<![^\s(\[{"'„“”«»‘’])[-−]?(?:\d{1,3}(?:[ \x{A0}]\d{3})+|\d{1,3}(?:\.\d{3}){2,}|\d+)(?:,\d+)?(?:(?: ?[-–] ?)(?:\d{1,3}(?:[ \x{A0}]\d{3})+|\d{1,3}(?:\.\d{3}){2,}|\d+)(?:,\d+)?)?(?![\w]|[.,:]\d|[ \x{A0}]\d)"#;
+    c.sub(&rx(pat), &t, |m| {
+        let span = g(m, 0);
+        if !search(r"\d{7}|\d{1,3}(?:[ \x{A0}]\d{3}){2}|\d{1,3}(?:\.\d{3}){2}", span) {
+            return None;
+        }
+        let w = words(span, "sv");
+        let fixed = sv_one_scale(&w);
+        if fixed == w {
+            return None;
+        }
+        let whole = m.get(0).unwrap();
+        if search(r"[\d+][ \x{A0}]*$", &t[..whole.start()]) {
+            return None; // a phone number or a list of numbers
+        }
+        let rest = &t[whole.end()..];
+        match rx(r"^[ \x{A0}]+([^\W\d_]+)").captures(rest) {
+            Ok(Some(nm)) => {
+                if !words(&format!("{span} {}", g(&nm, 1)), "sv").starts_with(&format!("{w} ")) {
+                    return None; // a unit or a currency the grammar reads with the number (en miljon kilometer)
+                }
+            }
+            _ => {
+                if !matches_at_start(r#"[ \x{A0}]*(?:$|\n|[.,;:!?)\]"»”…](?!\w))"#, rest) {
+                    return None;
+                }
+            }
+        }
+        Some(fixed)
+    })
 }
 
 const SV_ABBREV: [(&str, &str); 5] = [
@@ -190,4 +318,8 @@ static SV_CUES: YearCues = YearCues {
 
 fn sv_year(t: String, c: &mut Ctx) -> String {
     nordic_year(t, c, &SV_CUES)
+}
+
+fn sv_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "sv", SV_DOT_GROUPED)
 }

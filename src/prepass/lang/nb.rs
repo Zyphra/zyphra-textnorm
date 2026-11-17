@@ -5,18 +5,29 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use super::super::{Ctx, g, py_int, rx};
-use super::da::{YearCues, abbrev_rule, nordic_year, set};
+use super::super::{Ctx, g, matches_at_start, py_int, rx};
+use super::da::{
+    YearCues, abbrev_rule, kroner_code, money_decimal, money_range, nordic_year, per_unit, scale_money, set,
+    unit_groups,
+};
 use super::{LangRule, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("nb.money-range", nb_money_range),
     ("nb.minus", nb_minus),
+    ("nb.money-code", nb_money_code),
+    ("nb.money-decimal", nb_money_decimal),
+    ("nb.code-first", nb_code_first),
+    ("nb.scale-money", nb_scale_money),
+    ("nb.per-unit", nb_per_unit),
     ("nb.scale", nb_scale),
     ("nb.units", nb_units),
+    ("nb.units-more", nb_units_more),
     ("nb.abbrev", nb_abbrev),
     ("nb.date", nb_date),
     ("nb.decade", nb_decade),
     ("nb.year", nb_year),
+    ("nb.unit-groups", nb_unit_groups),
 ];
 
 const MONTHS: [&str; 12] = [
@@ -47,12 +58,74 @@ fn nb_year_words(y: u128) -> String {
     format!("{head} {}", words(&r.to_string(), "nb"))
 }
 
+/// The signs and codes the grammar reads after an amount (src/lang/nb/money.rs), longest first.
+const NB_CUR: &str = r"kr\.|US\$|NOK|USD|EUR|GBP|JPY|CAD|AUD|SEK|DKK|CHF|INR|RUB|KRW|TRY|ILS|UAH|VND|BDT|PHP|THB|AMD|kr|\$|€|£|¥|₽|₩|₺|₪|₴|₫|৳|₱|฿|֏";
+/// The ones it reads with cents (kroner og øre, dollar og cent, euro og cent).
+const NB_CENTS: &str = r"kr\.|US\$|NOK|USD|EUR|kr|\$|€";
+const NB_NUM: &str = r"(?:[1-9]\d{0,2}(?:[ \x{A0}]\d{3})+|[1-9]\d{0,2}(?:\.\d{3})+|\d+)(?:,\d{1,2})?";
+const NB_GROUPED: &str = r"[1-9]\d{0,2}(?:\.\d{3})+|[1-9]\d{0,2}(?:[ \x{A0}]\d{3})+";
+
+fn nb_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, NB_CUR)
+}
+
+fn nb_money_decimal(t: String, c: &mut Ctx) -> String {
+    money_decimal(t, c, &format!("{NB_CENTS}|kroner|euro|dollar"), NB_CENTS, NB_NUM, "til", true)
+}
+
+const NB_CODES: &[(&str, (&str, &str))] =
+    &[("SEK", ("svensk", "svenske")), ("DKK", ("dansk", "danske")), ("ISK", ("islandsk", "islandske"))];
+
+fn nb_money_code(t: String, c: &mut Ctx) -> String {
+    kroner_code(t, c, "nb", NB_CODES, "kr", r"\bkrone\b", r"\bkroner\b", NB_NUM, r"[. \x{A0}]")
+}
+
+fn nb_code_first(t: String, c: &mut Ctx) -> String {
+    let p = format!(r"(?<!\w)(CHF|KRW|TRY|ILS|UAH|VND|BDT|PHP|THB|AMD) ?((?:{NB_GROUPED}|\d+))(?![\w]|[.,]\d)");
+    c.sub_tpl(&rx(&p), &t, r"\2 \1")
+}
+
+fn nb_scale_money(t: String, c: &mut Ctx) -> String {
+    scale_money(t, c, NB_CUR, NB_NUM, "nb", &["kr.", "kr"])
+}
+
+const NB_PER: &[(&str, &str)] = &[
+    ("md.", "per måned"),
+    ("md", "per måned"),
+    ("mnd.", "per måned"),
+    ("mnd", "per måned"),
+    ("måned", "per måned"),
+    ("år", "per år"),
+    ("dag", "per dag"),
+    ("døgn", "per døgn"),
+    ("uke", "per uke"),
+    ("time", "per time"),
+    ("stk.", "per stykk"),
+    ("stk", "per stykk"),
+    ("person", "per person"),
+    ("pers.", "per person"),
+    ("natt", "per natt"),
+    ("g", "per gram"),
+    ("l", "per liter"),
+    ("liter", "per liter"),
+    ("km", "per kilometer"),
+    ("m²", "per kvadratmeter"),
+    ("m2", "per kvadratmeter"),
+    ("kvm", "per kvadratmeter"),
+    ("m", "per meter"),
+    ("m³", "per kubikkmeter"),
+];
+
+fn nb_per_unit(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, NB_CUR, NB_PER)
+}
+
 fn nb_scale(t: String, c: &mut Ctx) -> String {
-    let t = c.sub(&rx(r"(?<![\w.,])(\d+(?:,\d+)?) ?(mill|mln|mrd|mnd)(?:\.|(?![\w-]))"), &t, |m| {
+    let t = c.sub(&rx(r"(?<![\w.,])(\d+(?:,\d+)?) ?(mill|mln|mrd|mnd|mio|mia)(?:\.|(?![\w-]))"), &t, |m| {
         let (num, abbr) = (g(m, 1), g(m, 2));
         let (sg, pl) = match abbr {
-            "mill" | "mln" => ("million", "millioner"),
-            "mrd" => ("milliard", "milliarder"),
+            "mill" | "mln" | "mio" => ("million", "millioner"),
+            "mrd" | "mia" => ("milliard", "milliarder"),
             _ => ("måned", "måneder"),
         };
         Some(format!("{num} {}", if num == "1" { sg } else { pl }))
@@ -64,6 +137,24 @@ fn nb_units(t: String, c: &mut Ctx) -> String {
     let t = c.sub_tpl(&rx(r"(\d ?)kvm\b\.?"), &t, r"\1m²");
     c.sub(&rx(r"(\d ?)(km|dm|cm|mm|m)([23])(?![\w²³/])"), &t, |m| {
         Some(format!("{}{}{}", g(m, 1), g(m, 2), if g(m, 3) == "2" { "²" } else { "³" }))
+    })
+}
+
+fn nb_units_more(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(r"(?<![\w.,])(\d+(?:,\d+)?)( ?)(ha|spsk)(\.)?(?![\w/²³-])"), &t, |m| {
+        let unit = if g(m, 3) == "ha" {
+            "hektar"
+        } else if g(m, 1) == "1" {
+            "spiseskje"
+        } else {
+            "spiseskjeer"
+        };
+        let dot = if !g(m, 4).is_empty() && matches_at_start(r"[ \t]*(?:\n|$)", &t[m.get(0).unwrap().end()..]) {
+            "."
+        } else {
+            ""
+        };
+        Some(format!("{}{}{unit}{dot}", g(m, 1), g(m, 2)))
     })
 }
 
@@ -153,4 +244,8 @@ fn nb_minus(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![\w.,)\]\-−+*/=^])[-−](?=\d+(?:[.,]\d+)?\s?(?:[°%‰]|[^\W\d_]))"), &t, |_| {
         Some("minus ".to_string())
     })
+}
+
+fn nb_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "nb", NB_GROUPED)
 }

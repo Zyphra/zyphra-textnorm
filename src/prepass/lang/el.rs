@@ -21,6 +21,12 @@ pub(super) const RULES: &[LangRule] = &[
     ("el.half", el_half),
     ("el.date-day", el_date_day),
     ("el.scale-one", el_scale_one),
+    ("el.money-range", el_money_range),
+    ("el.money-decimal", el_money_decimal),
+    ("el.pound", el_pound),
+    ("el.groups-unit", el_groups_unit),
+    ("el.per-unit", el_per_unit),
+    ("el.units", el_units),
     ("el.number-agree", el_number_agree),
 ];
 
@@ -551,4 +557,150 @@ fn el_scale_one(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![\w.,:/])1([ \t\x{A0}]+)(εκατ\.|δισ\.)"), &t, |m| {
         Some(format!("1{}{}", g(m, 1), if g(m, 2) == "εκατ." { "εκατομμύριο" } else { "δισεκατομμύριο" }))
     })
+}
+
+// ================================================================================ money and units (Nov 16 b)
+
+const MONEY_CUR: &str = r"€|EUR|\$|USD|£|GBP|CHF|TRY";
+const MONEY_SIGN: &str = r"[€$£]";
+const SP: &str = r"[ \t\xa0]";
+
+fn el_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<=\d)((?:{SP}?(?:{MONEY_CUR}))?) ?~ ?(?={MONEY_SIGN}?\d)")), &t, r"\1-");
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN})(\d+(?:,\d{{1,2}})?)-(\d+(?:,\d{{1,2}})?)(?![\d,.]?\d|{SP}?(?:{MONEY_CUR})(?!\w))"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 2), g(m, 3), g(m, 1))),
+    );
+    c.sub_tpl(&rx(r"(?<![\w.,~\d])~ ?(?=\d)"), &t, "περίπου ")
+}
+
+fn el_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w.,])(\d{{1,3}}(?:\.\d{{3}})+|\d+),(\d)(?={SP}?(?:€|EUR|\$|USD)(?!\w))")),
+        &t,
+        |m| Some(format!("{},{}0", g(m, 1), g(m, 2))),
+    );
+    c.sub(&rx(r"(?<![\w.,])([€$])(\d{1,3}(?:\.\d{3})+|\d+),(\d)(?![\d\w]|,\d)"), &t, |m| {
+        Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3)))
+    })
+}
+
+/// n in the feminine (μία, τρεις, είκοσι μία), from the grammar's reading of n £ (λίρα is feminine).
+fn fem_number(n: u128) -> String {
+    let r = words(&format!("{n} £"), "el");
+    if r.ends_with(" λίρες") || r.ends_with(" λίρα") {
+        r.rsplit_once(' ').map_or(r.clone(), |(a, _)| a.to_string())
+    } else {
+        words(&n.to_string(), "el")
+    }
+}
+
+fn el_pound_money(num: &str, frac: &str) -> Option<String> {
+    let mut out = words(&format!("{num} £"), "el");
+    let cents = py_int(&format!("{frac:0<2}"));
+    if cents > 0 {
+        let p = if cents == 1 { "μία πένα".to_string() } else { format!("{} πένες", fem_number(cents)) };
+        out = format!("{out} και {p}");
+    }
+    if super::super::search(r"[\d£]", &out) { None } else { Some(out) }
+}
+
+fn el_pound(t: String, c: &mut Ctx) -> String {
+    let t =
+        c.sub(&rx(&format!(r"(?<![\w.,])(\d{{1,3}}(?:\.\d{{3}})+|\d+),(\d{{1,2}}){SP}?(?:£|GBP)(?!\w)")), &t, |m| {
+            el_pound_money(g(m, 1), g(m, 2))
+        });
+    let t = c.sub(&rx(r"(?<![\w.,])£(\d{1,3}(?:\.\d{3})+|\d+),(\d{1,2})(?![\d\w]|,\d)"), &t, |m| {
+        el_pound_money(g(m, 1), g(m, 2))
+    });
+    c.sub(&rx(&format!(r"(?<![\w.,])(\d+)-(\d+){SP}?£(?!\w)")), &t, |m| {
+        Some(format!("{} έως {}", fem_number(py_int(g(m, 1))), words(&format!("{} £", g(m, 2)), "el")))
+    })
+}
+
+fn el_groups_unit(t: String, c: &mut Ctx) -> String {
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])([1-9]\d{{0,2}}(?:\.\d{{3}})+)(,\d+)?(?![\d]|[.,]\d)({SP}?)([A-Za-zμ]+[²³]?)(?![\w/])"
+        )),
+        &t,
+        |m| {
+            let (num, frac, sep, tok) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+            let plain = format!("{}{frac}", num.replace('.', ""));
+            let new = words(&format!("{plain} {tok}"), "el");
+            if super::super::search(r"[\dA-Za-z]", &new) || words(&format!("{num}{frac}{sep}{tok}"), "el") == new {
+                return None;
+            }
+            Some(format!("{plain} {tok}"))
+        },
+    )
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("μήνα", "τον μήνα"),
+    ("μήνας", "τον μήνα"),
+    ("ημέρα", "την ημέρα"),
+    ("μέρα", "την ημέρα"),
+    ("εβδομάδα", "την εβδομάδα"),
+    ("έτος", "τον χρόνο"),
+    ("χρόνο", "τον χρόνο"),
+    ("άτομο", "το άτομο"),
+    ("νύχτα", "τη νύχτα"),
+    ("βράδυ", "τη νύχτα"),
+    ("λίτρο", "το λίτρο"),
+    ("κιλό", "το κιλό"),
+    ("τεμ.", "το τεμάχιο"),
+    ("τεμάχιο", "το τεμάχιο"),
+    ("τ.μ.", "το τετραγωνικό μέτρο"),
+    ("τμ", "το τετραγωνικό μέτρο"),
+    ("m²", "το τετραγωνικό μέτρο"),
+    ("m2", "το τετραγωνικό μέτρο"),
+    ("kWh", "την κιλοβατώρα"),
+    ("km", "το χιλιόμετρο"),
+    ("l", "το λίτρο"),
+];
+
+fn el_per_unit(t: String, c: &mut Ctx) -> String {
+    let mut ks: Vec<&str> = PER_UNIT.iter().map(|kv| kv.0).collect();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    let dens = ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|");
+    let t =
+        c.sub(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN})(\d{{1,3}}(?:\.\d{{3}})+|\d+)(,\d{{1,2}})?/(?=\w)")), &t, |m| {
+            Some(format!("{}{} {}/", g(m, 2), g(m, 3), g(m, 1)))
+        });
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"(?<=\d)({SP}?(?:{MONEY_CUR}))/({dens})(?![\w²³])")), &t, |m| {
+        let den = g(m, 2);
+        let rest = &s[m.get(0).map_or(0, |x| x.end())..];
+        let dot =
+            if den.ends_with('.') && matches_at_start(r"\s*$|\s+[Α-ΩΆΈΉΊΌΎΏA-Z]", rest) { "." } else { "" };
+        let per = PER_UNIT.iter().find(|kv| kv.0 == den)?.1;
+        Some(format!("{} {per}{dot}", g(m, 1)))
+    })
+}
+
+/// Units and currencies the grammar leaves as typed: the noun after 1 and after other numbers.
+const UNIT_WORDS: &[(&str, (&str, &str))] = &[
+    ("ha", ("εκτάριο", "εκτάρια")),
+    ("TL", ("TRY", "TRY")),
+    ("BGN", ("βουλγαρικό λεβ", "βουλγαρικά λέβα")),
+    ("ALL", ("αλβανικό λεκ", "αλβανικά λεκ")),
+];
+
+fn el_units(t: String, c: &mut Ctx) -> String {
+    let mut ks: Vec<&str> = UNIT_WORDS.iter().map(|kv| kv.0).collect();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    let keys = ks.join("|");
+    c.sub(
+        &rx(&format!(r"(?<![\w.,])(\d{{1,3}}(?:\.\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?)({SP}?)({keys})(?![\w/²])")),
+        &t,
+        |m| {
+            let (one, many) = UNIT_WORDS.iter().find(|kv| kv.0 == g(m, 3))?.1;
+            Some(format!("{} {}", g(m, 1), if g(m, 1) == "1" { one } else { many }))
+        },
+    )
 }

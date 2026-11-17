@@ -17,15 +17,21 @@ pub(super) const RULES: &[LangRule] = &[
     ("pt.abbrev", pt_abbrev),
     ("pt.seculo", pt_seculo),
     ("pt.regnal", pt_regnal),
+    ("pt.space-groups", pt_space_groups),
     ("pt.money-code", pt_money_code),
+    ("pt.money-range", pt_money_range),
+    ("pt.per-unit", pt_per_unit),
     ("pt.money-cents", pt_money_cents),
     ("pt.money-scale", pt_money_scale),
     ("pt.units", pt_units),
+    ("pt.scale-de", pt_scale_de),
     ("pt.range", pt_range),
     ("pt.score", pt_score),
     ("pt.half", pt_half),
     ("pt.hour-article", pt_hour_article),
     ("pt.gender", pt_gender),
+    ("pt.scale-e", pt_scale_e),
+    ("pt.sign-punct", pt_sign_punct),
 ];
 
 const LETTER: &str = r"[^\W\d_]";
@@ -101,6 +107,34 @@ fn feminine(w: &str) -> String {
         .map(|(i, x)| if i < start { *x } else { FEM.iter().find(|(a, _)| a == x).map_or(*x, |(_, b)| *b) })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// A whole number of a million or more, dot-grouped or plain (7 to 15 digits, no leading zero).
+const BIG_NUM: &str = r"[1-9][0-9]{0,2}(?:\.[0-9]{3}){2,4}|[1-9][0-9]{6,14}";
+
+/// `w`, a reading that starts with the grammar's words for the whole number `num`, with “e” before the last group of
+/// a number from a million up when that group is below 100 or a round hundred (prototype `with_e`).
+fn with_e(num: &str, w: &str) -> String {
+    let d = num.replace('.', "");
+    if d.len() < 7 || d.len() > 15 || d.starts_with('0') || !d.chars().all(|ch| ch.is_ascii_digit()) {
+        return w.to_string();
+    }
+    let mut n: u64 = d.parse().unwrap_or(0);
+    let mut k = 0;
+    while n > 0 && n % 1000 == 0 {
+        n /= 1000;
+        k += 1;
+    }
+    let v = n % 1000;
+    if v == n || !(v < 100 || v % 100 == 0) {
+        return w.to_string();
+    }
+    let head = words(num, "pt");
+    let tail = words(&format!("{v}{}", "000".repeat(k)), "pt");
+    if !w.starts_with(&head) || !head.ends_with(&format!(" {tail}")) || head.ends_with(&format!(" e {tail}")) {
+        return w.to_string();
+    }
+    format!("{}e {tail}{}", &head[..head.len() - tail.len()], &w[head.len()..])
 }
 
 // ------------------------------------------------------------------------------------------------ noun genders
@@ -371,12 +405,70 @@ fn code_key(k: &str) -> &'static str {
     CODES.iter().find(|(a, _)| *a == k).map_or("", |(_, v)| *v)
 }
 
+/// The currencies of the other Portuguese-speaking countries and of Brazil's neighbours, and a few common ones the
+/// grammar does not know: code, singular, plural, cent singular, cent plural (no cents: "").
+const LOCAL_CODES: &[(&str, &str, &str, &str, &str)] = &[
+    ("AOA", "kwanza", "kwanzas", "cêntimo", "cêntimos"),
+    ("Kz", "kwanza", "kwanzas", "cêntimo", "cêntimos"),
+    ("MZN", "metical", "meticais", "centavo", "centavos"),
+    ("CVE", "escudo cabo-verdiano", "escudos cabo-verdianos", "centavo", "centavos"),
+    ("ARS", "peso argentino", "pesos argentinos", "centavo", "centavos"),
+    ("UYU", "peso uruguaio", "pesos uruguaios", "centésimo", "centésimos"),
+    ("CLP", "peso chileno", "pesos chilenos", "", ""),
+    ("PYG", "guarani", "guaranis", "", ""),
+    ("BOB", "boliviano", "bolivianos", "centavo", "centavos"),
+    ("MXN", "peso mexicano", "pesos mexicanos", "centavo", "centavos"),
+    ("CHF", "franco suíço", "francos suíços", "cêntimo", "cêntimos"),
+    ("JPY", "iene", "ienes", "", ""),
+];
+
+/// “2.000.000 AOA” → “dois milhões de kwanzas”, “2,50 MZN” → “dois meticais e cinquenta centavos” (prototype
+/// `local_amount`).
+fn local_amount(minus: &str, num: &str, cents: &str, code: &str) -> Option<String> {
+    let &(_, one, many, minor1, minor_n) = LOCAL_CODES.iter().find(|x| x.0 == code)?;
+    let cv = if cents.is_empty() { 0 } else { py_int(&format!("{cents}0")[..2]) };
+    if cv != 0 && minor1.is_empty() {
+        return None;
+    }
+    let n = py_int(&num.replace('.', ""));
+    let minor = if cv == 1 { minor1 } else { minor_n };
+    let out = if n == 0 && cv != 0 {
+        format!("{} {minor}", words(&cv.to_string(), "pt"))
+    } else {
+        let w = with_e(num, &words(num, "pt"));
+        let name = if n == 1 {
+            one.to_string()
+        } else if BIG.contains(&w.split(' ').next_back().unwrap_or("")) {
+            format!("de {many}")
+        } else {
+            many.to_string()
+        };
+        let mut out = format!("{w} {name}");
+        if cv != 0 {
+            out = format!("{out} e {} {minor}", words(&cv.to_string(), "pt"));
+        }
+        out
+    };
+    Some(format!("{}{out}", if minus.is_empty() { "" } else { "menos " }))
+}
+
 fn pt_money_code(t: String, c: &mut Ctx) -> String {
     let codes = CODES.iter().map(|(k, _)| *k).collect::<Vec<_>>().join("|");
     let t = c.sub(&rx(&format!(r"(?<![\w.,])(\d+(?:[.,]\d+)*){SP}?({codes})(?!\w)")), &t, |m| {
         Some(format!("{} {}", code_key(g(m, 2)), g(m, 1)))
     });
     let t = c.sub(&rx(&format!(r"(?<!\w)({codes}){SP}?(?=\d)")), &t, |m| Some(format!("{} ", code_key(g(m, 1)))));
+    let alt = LOCAL_CODES.iter().map(|x| x.0).collect::<Vec<_>>().join("|");
+    let t =
+        c.sub(&rx(&format!(r"(?<![\w.,\-–~])([-−]?)({INTEGER})(?:,(\d{{1,2}}))?{SP}?({alt})(?!\w)")), &t, |m| {
+            local_amount(g(m, 1), g(m, 2), g(m, 3), g(m, 4))
+        });
+    let t = c.sub(
+        &rx(&format!(r"(?<!\w)({alt}){SP}?([-−]?)({INTEGER})(?:,(\d{{1,2}}))?(?!\w|[.,]\d|{SP}?[-–~])")),
+        &t,
+        |m| local_amount(g(m, 2), g(m, 3), g(m, 4), g(m, 1)),
+    );
+    let t = c.sub_tpl(&rx(&format!(r"(?<![\w$])¥{SP}?({INTEGER})(?!\w|[.,]\d)")), &t, r"\1 ¥");
     // £ 2 → 2 libras esterlinas, so the number agrees (the grammar read “dois libras esterlinas”)
     let scale = format!(r"(?!{SP}*(?:{})(?!\w))", SCALES.iter().map(|s| s.0).collect::<Vec<_>>().join("|"));
     let re = rx(&format!(r"(?<![\w$])£{SP}?({INTEGER})(?!\w|[.,]\d){scale}|(?<![\w.,])({INTEGER}){SP}?£(?!\w)"));
@@ -390,6 +482,56 @@ fn pt_money_code(t: String, c: &mut Ctx) -> String {
     })
 }
 
+const SIGN: &str = r"R\$|US\$|€|£|\$|¥";
+const AMT: &str = r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d{1,2})?";
+
+/// An amount as written (“1.200”, “2,5”, “7,50”) in cents, to compare the two ends of a range.
+fn cents_of(a: &str) -> u128 {
+    let (i, d) = a.split_once(',').unwrap_or((a, ""));
+    let dv = if d.is_empty() { 0 } else { py_int(&format!("{d}0")[..2]) };
+    py_int(&i.replace('.', "")).saturating_mul(100).saturating_add(dv)
+}
+
+fn pt_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w$])({SIGN})({SP}?)({AMT}){SP}?[-–~]{SP}?(?:({SIGN}){SP}?)?({AMT})(?!\w|[.,]\d)")),
+        &t,
+        |m| {
+            let (s, sp, a, s2, b) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5));
+            if (!s2.is_empty() && s2 != s) || cents_of(a) >= cents_of(b) {
+                return None;
+            }
+            Some(if a.contains(',') { format!("{s}{sp}{a} a {s}{sp}{b}") } else { format!("{a} a {b} {s}") })
+        },
+    );
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w.,])({AMT})(?:{SP}?({SIGN}))?{SP}?[-–~]{SP}?({AMT})({SP}?)({SIGN})(?![\w$])")),
+        &t,
+        |m| {
+            let (a, s1, b, sp, s) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5));
+            if (!s1.is_empty() && s1 != s) || cents_of(a) >= cents_of(b) {
+                return None;
+            }
+            Some(if a.contains(',') { format!("{a}{sp}{s} a {b}{sp}{s}") } else { format!("{a} a {b}{sp}{s}") })
+        },
+    );
+    let t = c.sub_tpl(&rx(&format!(r"(?<![\w.,$€£¥])[-−]({SIGN})({SP}?)({AMT})(?!\w|[.,]\d)")), &t, r"menos \1\2\3");
+    let t = c.sub_tpl(&rx(&format!(r"(?<![\w.,$€£¥])[-−]({AMT})({SP}?)({SIGN})(?![\w$])")), &t, r"menos \1\2\3");
+    c.sub_tpl(&rx(&format!(r"(?<![\w$])({SIGN})({SP}?)[-−]({AMT})(?!\w|[.,]\d)")), &t, r"menos \1\2\3")
+}
+
+// ------------------------------------------------------------------------------------------------ per-unit prices
+
+fn pt_per_unit(t: String, c: &mut Ctx) -> String {
+    let scale = format!(r"(?:{SP}+(?:mil|milhão|milhões|mi|bilhão|bilhões|bi))?");
+    let amount = format!(r"(?:(?:{SIGN}){SP}?{AMT}{scale}|{AMT}{scale}{SP}?(?:{SIGN}))");
+    c.sub(&rx(&format!(r"(?<![\w.,$])({amount})/([^\W\d_]+[²³]?)(?![\w/²³])")), &t, |m| {
+        let one = words(&format!("1 {}", g(m, 2)), "pt");
+        let rest = one.strip_prefix("um ").or_else(|| one.strip_prefix("uma "))?;
+        full(&format!("{LETTER}+(?: {LETTER}+)*"), rest).then(|| format!("{} por {rest}", g(m, 1)))
+    })
+}
+
 fn amount(n: &str, cents: &str) -> Option<String> {
     let n2 = n.replace('.', "");
     if cents == "00" {
@@ -399,10 +541,10 @@ fn amount(n: &str, cents: &str) -> Option<String> {
 }
 
 fn pt_money_cents(t: String, c: &mut Ctx) -> String {
-    let t = c.sub(&rx(&format!(r"(?<![\w$])({SYMBOLS})({SP}?)({INTEGER}),(\d{{2}})(?!\w|[.,]\d)")), &t, |m| {
+    let t = c.sub(&rx(&format!(r"(?<![\w$])({SYMBOLS})({SP}?)({INTEGER}),(\d{{1,2}})(?!\w|[.,]\d)")), &t, |m| {
         amount(g(m, 3), g(m, 4)).map(|a| format!("{}{}{a}", g(m, 1), g(m, 2)))
     });
-    c.sub(&rx(&format!(r"(?<![\w.,])({INTEGER}),(\d{{2}})({SP}?€)(?!\w)")), &t, |m| {
+    c.sub(&rx(&format!(r"(?<![\w.,])({INTEGER}),(\d{{1,2}})({SP}?(?:{SYMBOLS}))(?![\w$])")), &t, |m| {
         amount(g(m, 1), g(m, 2)).map(|a| format!("{a}{}", g(m, 3)))
     })
 }
@@ -431,6 +573,23 @@ fn pt_money_scale(t: String, c: &mut Ctx) -> String {
 // ------------------------------------------------------------------------------------------------ units
 
 const FEM_UNITS: &[&str] = &["t", "cal", "kcal", "rpm", "mph"];
+/// Unit symbols the grammar leaves as written: symbol, singular, plural, feminine.
+const MORE_UNITS: &[(&str, &str, &str, bool)] = &[
+    ("GB", "gigabyte", "gigabytes", false),
+    ("MB", "megabyte", "megabytes", false),
+    ("TB", "terabyte", "terabytes", false),
+    ("KB", "quilobyte", "quilobytes", false),
+    ("kB", "quilobyte", "quilobytes", false),
+    ("Mbps", "megabit por segundo", "megabits por segundo", false),
+    ("Gbps", "gigabit por segundo", "gigabits por segundo", false),
+    ("lb", "libra", "libras", true),
+    ("lbs", "libra", "libras", true),
+    ("oz", "onça", "onças", true),
+    ("dB", "decibel", "decibéis", false),
+    ("µg", "micrograma", "microgramas", false),
+    ("μg", "micrograma", "microgramas", false),
+    ("mcg", "micrograma", "microgramas", false),
+];
 
 fn pt_units(t: String, c: &mut Ctx) -> String {
     let t = c.sub(&rx(&format!(r"(?<![\w.,])(\d+(?:[.,]\d+)*){SP}?km/h(?!\w)")), &t, |m| {
@@ -440,7 +599,7 @@ fn pt_units(t: String, c: &mut Ctx) -> String {
     let mut units: Vec<&str> = FEM_UNITS.to_vec();
     units.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then(a.cmp(b)));
     let alt = units.join("|");
-    c.sub(&rx(&format!(r"{NUM_BEFORE}({NUM})({SP}?)({alt})(?![\w/])")), &t, |m| {
+    let t = c.sub(&rx(&format!(r"{NUM_BEFORE}({NUM})({SP}?)({alt})(?![\w/])")), &t, |m| {
         let (num, unit) = (g(m, 1), g(m, 3));
         let base = words(num, "pt");
         let whole = words(&format!("{num} {unit}"), "pt");
@@ -448,8 +607,127 @@ fn pt_units(t: String, c: &mut Ctx) -> String {
         if fem == base || !whole.starts_with(&format!("{base} ")) {
             return None;
         }
-        Some(format!("{fem}{}", &whole[base.len()..]))
+        Some(format!("{}{}", feminine(&with_e(num, &base)), &whole[base.len()..]))
+    });
+    let mut more: Vec<&str> = MORE_UNITS.iter().map(|u| u.0).collect();
+    more.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then(a.cmp(b)));
+    let alt = more.join("|");
+    c.sub(&rx(&format!(r"(?<![\w.,\-–~])([-−]?)({INTEGER})(?:,(\d+))?{SP}?({alt})(?![\w/²³])")), &t, |m| {
+        let (minus, num, dec) = (g(m, 1), g(m, 2), g(m, 3));
+        let &(_, one, many, fem) = MORE_UNITS.iter().find(|u| u.0 == g(m, 4))?;
+        let w = if m.get(3).is_some() {
+            words(&format!("{num},{dec}"), "pt")
+        } else {
+            let w = with_e(num, &words(num, "pt"));
+            if fem { feminine(&w) } else { w }
+        };
+        let unit = if num == "1" && m.get(3).is_none() {
+            one.to_string()
+        } else if BIG.contains(&w.split(' ').next_back().unwrap_or("")) {
+            format!("de {many}")
+        } else {
+            many.to_string()
+        };
+        Some(format!("{}{w} {unit}", if minus.is_empty() { "" } else { "menos " }))
     })
+}
+
+// ------------------------------------------------------------------------------------------------ round millions
+
+/// A whole number of millions as written (2.000.000, 3.500.000.000, 2000000; no leading zero); its reading decides.
+const ROUND: &str = r"(?:[1-9]\d{0,2}(?:\.\d{3})*\.000\.000|[1-9]\d{0,8}000000)(?![\w%°ºª'’]|[.,:/\-–]\d)";
+const SCALE_WORDS: &str = "milhão|milhões|bilhão|bilhões|trilhão|trilhões|quatrilhão|quatrilhões";
+/// Lower-case plural words after a round million that are not what it counts.
+const SCALE_NOT_COUNTED: &str = "
+mais menos depois antes através atrás apenas pois então após jamais demais os as dos das nos nas pelos pelas aos às
+uns umas outros outras todos todas ambos ambas estes estas esses essas aqueles aquelas muitos muitas poucos poucas
+vários várias alguns algumas nenhuns nenhumas certos certas tantos tantas quantos quantas nós vós eles elas vocês
+seus suas meus minhas teus tuas nossos nossas vossos vossas dois duas três seis dezesseis dezasseis somos estamos
+temos vamos podemos fomos éramos és estás tens podes fazes vais dás sabes queres deves dizes anuais mensais semanais
+diários diárias trimestrais adicionais restantes líquidos brutos totais iniciais extras exatos grátis
+previstos previstas dispostos propostos primeiros primeiras últimos últimas
+";
+/// -ados/-idos words that are counted nouns (“2.000.000 desabrigados”).
+const PARTICIPLE_NOUNS: &str = "
+soldados estados empregados deputados aliados afiliados advogados aposentados desalojados desabrigados refugiados
+deslocados infectados contaminados vacinados afetados feridos detidos desaparecidos partidos vestidos apelidos pedidos
+sentidos ruídos maridos cunhados mercados resultados dados lados pecados prados telhados condados punhados cuidados
+legados delegados graduados convidados assalariados entrevistados associados assinados
+";
+static SCALE_NOT_COUNTED_SET: LazyLock<HashSet<&str>> = LazyLock::new(|| set(SCALE_NOT_COUNTED));
+static PARTICIPLE_NOUNS_SET: LazyLock<HashSet<&str>> = LazyLock::new(|| set(PARTICIPLE_NOUNS));
+
+/// The grammar's words for a round million (“dois milhões”), or None when they do not end in milhão, milhões,
+/// bilhão, bilhões… (prototype `scale_head`).
+fn scale_head(num: &str) -> Option<String> {
+    let w = words(num, "pt");
+    BIG.contains(&w.split(' ').next_back().unwrap_or("")).then_some(w)
+}
+
+/// What the grammar read after the number's words in `spoken` (“dois milhões quilômetros” → “quilômetros”); a “de”
+/// the grammar wrote itself is dropped (prototype `counted`).
+fn counted(head: &str, spoken: &str) -> Option<String> {
+    let h: Vec<&str> = head.split(' ').collect();
+    let s: Vec<&str> = spoken.split(' ').collect();
+    if s.len() <= h.len() || s[h.len() - 1] != h[h.len() - 1] {
+        return None;
+    }
+    let mut rest = &s[h.len()..];
+    if rest[0] == "de" && rest.len() > 1 {
+        rest = &rest[1..];
+    }
+    if !rest.iter().all(|x| full(&format!("{LETTER}+"), x)) {
+        return None;
+    }
+    Some(rest.join(" "))
+}
+
+/// A plural noun after a round million (prototype `counted_noun`).
+fn counted_noun(w: &str) -> bool {
+    if w.chars().count() < 3
+        || !w.chars().next().is_some_and(char::is_lowercase)
+        || !w.ends_with('s')
+        || !full(&format!("{LETTER}+"), w)
+    {
+        return false;
+    }
+    if SCALE_NOT_COUNTED_SET.contains(w) || DETERMINERS_SET.contains(w) {
+        return false;
+    }
+    PARTICIPLE_NOUNS_SET.contains(w) || !(w.ends_with("ados") || w.ends_with("idos"))
+}
+
+/// The first word of `rest` ends in -s (the counted thing is plural).
+fn plural_first(rest: &str) -> bool {
+    rest.split(' ').next().unwrap_or("").ends_with('s')
+}
+
+fn pt_scale_de(t: String, c: &mut Ctx) -> String {
+    // 2.000.000 de €
+    let re = rx(&format!(r"{NUM_BEFORE}({ROUND}){SP}+de{SP}+(R\$|US\$|€|£|\$)(?![\w$€£/]|{SP}*\d)"));
+    let t = c.sub(&re, &t, |m| {
+        let rest = counted(&scale_head(g(m, 1))?, &words(&format!("{} {}", g(m, 1), g(m, 2)), "pt"))?;
+        (!rest.is_empty() && plural_first(&rest)).then(|| format!("{} de {rest}", g(m, 1)))
+    });
+    // 2 milhões de €, 2 milhões €
+    let re = rx(&format!(r"(?<!\w)({SCALE_WORDS}){SP}+(?:de{SP}+)?(R\$|US\$|€|£|\$)(?![\w$€£/]|{SP}*\d)"));
+    let t = c.sub(&re, &t, |m| {
+        let cur = CURRENCY_NAMES.iter().find(|x| x.0 == g(m, 2))?.2;
+        Some(format!("{} de {cur}", g(m, 1)))
+    });
+    // 2.000.000 pessoas, 2.000.000 km
+    c.sub(
+        &rx(&format!(r"{NUM_BEFORE}({ROUND})({SP}+)([^\W\d_]+(?:[²³]|/[^\W\d_]+)?)(?![\w/²³'’\-]|{SP}*\d)")),
+        &t,
+        |m| {
+            let (num, tok) = (g(m, 1), g(m, 3));
+            let rest = counted(&scale_head(num)?, &words(&format!("{num} {tok}"), "pt"))?;
+            if rest == tok {
+                return counted_noun(tok).then(|| format!("{num} de {tok}"));
+            }
+            plural_first(&rest).then(|| format!("{num} de {rest}"))
+        },
+    )
 }
 
 // ------------------------------------------------------------------------------------------------ ranges, scores
@@ -610,10 +888,65 @@ fn pt_gender(t: String, c: &mut Ctx) -> String {
                 let f = feminine(&format!("{w} mil"));
                 f[..f.len() - 4].to_string() // 2 mil pessoas: duas mil
             } else {
-                feminine(&w)
+                feminine(&with_e(&x[0], &w))
             };
             Some(if new != w { new } else { x[0].to_string() })
         });
         (new_chain != chain).then(|| format!("{new_chain}{}", &m0.as_str()[chain.len()..]))
+    })
+}
+
+// ------------------------------------------------------------------------------------------------ "e" between groups
+
+static TOKEN: LazyLock<String> = LazyLock::new(|| format!(r"(?:{SIGN}|[^\W\d_]+(?:[²³]|/[^\W\d_]+)?|[°º]C|%)"));
+
+fn pt_scale_e(t: String, c: &mut Ctx) -> String {
+    let token = &*TOKEN;
+    let re = rx(&format!(
+        r"(?<![\w$])({SIGN}){SP}?({BIG_NUM})(?:,\d{{1,2}})?(?!\w|[.,]\d)|{NUM_BEFORE}({BIG_NUM})(?:,\d{{1,2}}(?={SP}?(?:{SIGN})))?(?!\d|[.,]\d)(?:{SP}?{token})?(?![\w/²³'’$€£¥])"
+    ));
+    c.sub(&re, &t, |m| {
+        let m0 = m.get(0).expect("group 0");
+        let num = if m.get(2).is_some() { g(m, 2) } else { g(m, 3) };
+        if search(&format!(r"(?i)(?<!\w)ip{SP}+$"), chars_before(&t, m0.start(), 4)) {
+            return None; // “ip 1.197.000.069” is read digit by digit
+        }
+        let spoken = words(m0.as_str(), "pt");
+        let out = with_e(num, &spoken);
+        (out != spoken && full(&format!("{LETTER}+(?: {LETTER}+)*"), &out)).then_some(out)
+    })
+}
+
+fn pt_sign_punct(t: String, c: &mut Ctx) -> String {
+    let re = rx(&format!(r"{NUM_BEFORE}({AMT}){SP}({SIGN}|[^\W\d_]{{2,4}}[²³]?|[a-zµμ][²³]?|[°º]C)(?=[^\w\s/])"));
+    c.sub(&re, &t, |m| {
+        let (num, tok) = (g(m, 1), g(m, 2));
+        let spoken = words(&format!("{num} {tok}"), "pt");
+        if spoken == format!("{} {tok}", words(num, "pt")) || !full(&format!("{LETTER}+(?: {LETTER}+)*"), &spoken) {
+            return None;
+        }
+        (!(num.contains('.') && spoken.contains(" ponto "))).then_some(spoken) // a dot read as a decimal point
+    })
+}
+
+// ------------------------------------------------------------------------------------------------ space-grouped numbers
+
+const SPACE_NUM: &str = r"[1-9]\d{0,2}(?:[ \x{A0}\x{202F}]\d{3})+";
+
+fn pt_space_groups(t: String, c: &mut Ctx) -> String {
+    let re = rx(&format!(
+        r#"(?<![^\s(«“"'‘])((?:R\$|US\$|€|£|\$|¥)[ \t\x{{A0}}]?)?(?<![\w.,])(?<!\d[ \x{{A0}}\x{{202F}}])({SPACE_NUM})(?![ \x{{A0}}\x{{202F}}]?\d|[.,]\d{{3}}|,(?:\d\d|\d(?!\d))[^\s€$£¥])"#
+    ));
+    c.sub(&re, &t, |m| {
+        let m0 = m.get(0).expect("group 0");
+        let rest = &t[m0.end()..];
+        let ok = m.get(1).is_some()
+            || matches_at_start(r"(?:,\d{1,2})?[ \t\x{A0}\x{202F}]?(?:R\$|US\$|€|£|\$|¥)(?!\w)", rest)
+            || matches_at_start(r"[ \t\x{A0}\x{202F}]+(?!(?:mil|milhão|milhões|bilhão|bilhões|trilhão|trilhões|mi|bi|tri)(?!\w))[^\W\d_]+(?![\w])", rest)
+            || (g(m, 2).ends_with("000") && matches_at_start(r#"(?:\s|$|[.,;:!?)\]»”"…])"#, rest));
+        ok.then(|| {
+            let dotted: String = g(m, 2).chars().map(|ch| if " \u{a0}\u{202f}".contains(ch) { '.' } else { ch }).collect();
+            format!("{}{dotted}", g(m, 1))
+        })
     })
 }

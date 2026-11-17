@@ -12,6 +12,11 @@ pub(super) const RULES: &[LangRule] = &[
     ("nl.half", nl_half),
     ("nl.scale", nl_scale),
     ("nl.dash-price", nl_dash_price),
+    ("nl.money-range", nl_money_range),
+    ("nl.money-decimal", nl_money_decimal),
+    ("nl.trillion", nl_trillion),
+    ("nl.per-unit", nl_per_unit),
+    ("nl.money-words", nl_money_words),
     ("nl.units", nl_units),
     ("nl.time", nl_time),
     ("nl.een", nl_een),
@@ -134,8 +139,12 @@ fn nl_units(t: String, c: &mut Ctx) -> String {
         let unit = if g(m, 2) == "km" { "kilometer" } else { "meter" };
         Some(format!("{} {unit} per seconde", py_rstrip(g(m, 1))))
     });
-    c.sub(&rx(r"(\d ?)(km|dm|cm|mm|m)([23])(?![\w²³/])"), &t, |m| {
+    let t = c.sub(&rx(r"(\d ?)(km|dm|cm|mm|m)([23])(?![\w²³/])"), &t, |m| {
         Some(format!("{}{}{}", g(m, 1), g(m, 2), if g(m, 3) == "2" { "²" } else { "³" }))
+    });
+    // tonnes and hectares: the grammar left “t” and “ha” (5 t → vijf ton, 3 ha → drie hectare)
+    c.sub(&rx(r"(?<![\w.,])(\d[\d.]*(?:,\d+)?)( ?)(t|ha)(?![\w²³/])"), &t, |m| {
+        Some(format!("{} {}", g(m, 1), if g(m, 3) == "t" { "ton" } else { "hectare" }))
     })
 }
 
@@ -193,4 +202,149 @@ fn nl_een(t: String, c: &mut Ctx) -> String {
         };
         Some(format!("één uur{rest}"))
     })
+}
+
+// ======================================================================== money and big numbers (Nov 16 b)
+
+/// Currencies the grammar reads after an amount (with cent/pence after two decimals).
+const MONEY_CUR: &str = r"€|EUR|\$|USD|£|GBP|CHF|¥|JPY|TRY";
+const MONEY_SIGN: &str = r"[€$£¥]";
+
+fn nl_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<=\d)((?:[ \xa0]?(?:{MONEY_CUR}))?) ?~ ?(?={MONEY_SIGN}? ?\d)")), &t, r"\1-");
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN}) ?(\d+(?:,\d{{1,2}})?)-(\d+(?:,\d{{1,2}})?)(?![\d,.]?\d|[ \xa0]?(?:miljoen|miljard|biljoen|{MONEY_CUR})(?!\w))"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 2), g(m, 3), g(m, 1))),
+    )
+}
+
+fn nl_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(r"(?<![\w.,])(\d{1,3}(?:\.\d{3})+|\d+),(\d)(?=[ \xa0]?(?:€|EUR|\$|USD|£|GBP|CHF)(?!\w))"),
+        &t,
+        |m| Some(format!("{},{}0", g(m, 1), g(m, 2))),
+    );
+    c.sub(
+        &rx(r"(?<![\w.,])([€$£]) ?(\d{1,3}(?:\.\d{3})+|\d+),(\d)(?![\d\w]|,\d|[ \xa0]?(?:mln|mld|mrd|bln|miljoen|miljard|biljoen)(?!\w))"),
+        &t,
+        |m| Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3))),
+    )
+}
+
+/// 12345678 -> "12.345.678".
+fn group3(n: u128) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push('.');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn nl_trillion(t: String, c: &mut Ctx) -> String {
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN} ?)?(\d{{1,3}}(?:\.\d{{3}}){{4}}|\d{{1,3}}(?:[ \xa0]\d{{3}}){{4}}|[1-9]\d{{0,2}}0{{12}})(?![\d]|[ \xa0.]\d)(,\d{{1,2}}(?!\d))?(?:[ \xa0]?({MONEY_CUR})(?!\w))?"
+        )),
+        &t,
+        |m| {
+            let (sign, num, frac, cur) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+            if !frac.is_empty() && sign.is_empty() && cur.is_empty() {
+                return None;
+            }
+            let n = py_int(&num.chars().filter(char::is_ascii_digit).collect::<String>());
+            let (tr, rest) = (n / 1_000_000_000_000, n % 1_000_000_000_000);
+            if !(1..=999).contains(&tr) {
+                return None;
+            }
+            let tail = if cur.is_empty() { String::new() } else { format!(" {cur}") };
+            let out = if rest == 0 {
+                words(&format!("{sign}{tr}.000.000{frac}{tail}"), "nl")
+            } else {
+                format!(
+                    "{} {}",
+                    words(&format!("{tr}.000.000"), "nl"),
+                    words(&format!("{sign}{}{frac}{tail}", group3(rest)), "nl")
+                )
+            };
+            if !out.contains("miljoen") || super::super::search(r"\d", &out) {
+                return None;
+            }
+            Some(out.replacen("miljoen", "biljoen", 1))
+        },
+    )
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("mnd.", "per maand"),
+    ("mnd", "per maand"),
+    ("week", "per week"),
+    ("wk", "per week"),
+    ("m²", "per vierkante meter"),
+    ("m2", "per vierkante meter"),
+    ("m³", "per kubieke meter"),
+    ("m3", "per kubieke meter"),
+    ("persoon", "per persoon"),
+    ("pers.", "per persoon"),
+    ("p.p.", "per persoon"),
+    ("pp", "per persoon"),
+    ("stuk", "per stuk"),
+    ("st.", "per stuk"),
+    ("st", "per stuk"),
+    ("nacht", "per nacht"),
+    ("kWh", "per kilowattuur"),
+    ("km", "per kilometer"),
+    ("ha", "per hectare"),
+    ("l", "per liter"),
+    ("t", "per ton"),
+];
+
+fn nl_per_unit(t: String, c: &mut Ctx) -> String {
+    let mut ks: Vec<&str> = PER_UNIT.iter().map(|kv| kv.0).collect();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    let dens = ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|");
+    let s: &str = &t;
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN} ?\d[\d.]*(?:,\d{{1,2}})?|\d[\d.]*(?:,\d{{1,2}})?[ \xa0]?(?:{MONEY_CUR}))/({dens})(?![\w²³])"
+        )),
+        &t,
+        |m| {
+            let den = g(m, 2);
+            let dot = if den.ends_with('.') && matches_at_start(r"\s*$|\s+[A-Z]", &s[end(m)..]) { "." } else { "" };
+            let per = PER_UNIT.iter().find(|kv| kv.0 == den)?.1;
+            Some(format!("{} {per}{dot}", g(m, 1)))
+        },
+    )
+}
+
+/// Currencies the grammar leaves as typed: the name after 1 and after other numbers.
+const OTHER_CUR: &[(&str, (&str, &str))] = &[
+    ("SEK", ("Zweedse kroon", "Zweedse kronen")),
+    ("NOK", ("Noorse kroon", "Noorse kronen")),
+    ("DKK", ("Deense kroon", "Deense kronen")),
+    ("PLN", ("Poolse zloty", "Poolse zloty")),
+    ("CZK", ("Tsjechische kroon", "Tsjechische kronen")),
+    ("HUF", ("Hongaarse forint", "Hongaarse forint")),
+];
+
+fn nl_money_words(t: String, c: &mut Ctx) -> String {
+    let codes = OTHER_CUR.iter().map(|kv| kv.0).collect::<Vec<_>>().join("|");
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])(\d{{1,3}}(?:\.\d{{3}})+(?:,\d{{1,2}})?|\d+(?:,\d{{1,2}})?)([ \xa0]?)({codes})(?!\w)"
+        )),
+        &t,
+        |m| {
+            let (one, many) = OTHER_CUR.iter().find(|kv| kv.0 == g(m, 3))?.1;
+            Some(format!("{}{}{}", g(m, 1), g(m, 2), if g(m, 1) == "1" { one } else { many }))
+        },
+    )
 }

@@ -15,6 +15,10 @@ use super::super::{Ctx, full, g, matches_at_start, py_int, rx, search, tpl};
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("ar.groups", ar_groups),
+    ("ar.big", ar_big),
+    ("ar.money", ar_money),
+    ("ar.per", ar_per),
     ("ar.proclitic", ar_proclitic),
     ("ar.time", ar_time),
     ("ar.date", ar_date),
@@ -155,7 +159,7 @@ fn oblique(s: &str) -> String {
 
 /// A number ending in a dual before its noun drops the ن: مئتان دولار -> مئتي دولار.
 fn construct(s: &str) -> String {
-    sub_all(r"(?<!\w)(و?)(مئت|ألف|مليون|مليار)ان$", s, r"\1\2ي")
+    sub_all(r"(?<!\w)(و?)(مئت|ألف|مليون|مليار|تريليون)ان$", s, r"\1\2ي")
 }
 
 const ORD_M: [&str; 10] =
@@ -239,6 +243,7 @@ const NOUNS: &[(&str, char, &str)] = &[
     ("سنة", 'f', "سنوات"),
     ("عام", 'm', "أعوام"),
     ("مرة", 'f', "مرات"),
+    ("هكتار", 'm', "هكتارات"),
     ("شخص", 'm', "أشخاص"),
     ("سيارة", 'f', "سيارات"),
     ("بيضة", 'f', "بيضات"),
@@ -305,6 +310,93 @@ fn dual(w: &str) -> String {
 }
 
 // ------------------------------------------------------------------------------------------------- rules
+
+// ------------------------------------------------------------------------------------------------- money (Nov 16)
+
+const AR_SIGN: &str = r"[$€£¥₹]";
+const AR_CODE: &str = r"(?:USD|EUR|GBP|SAR|AED|EGP|KWD|QAR|BHD|OMR|JOD|MAD|TND|DZD|IQD|LBP|SYP|LYD|SDG|YER)";
+const AR_CUR_WORD: &str = concat!(
+    r"(?:دولارات|دولارا|دولار|يورو|ريالات|ريالا|ريال|دراهم|درهما|درهم|دنانير|دينارا|دينار|جنيهات|جنيها|جنيه|",
+    r"ليرات|ليرة|روبية|ر\.س|د\.إ|ج\.م|د\.ك)"
+);
+/// /شهر → في الشهر
+const AR_TIME: &[&str] = &["شهر", "يوم", "سنة", "عام", "أسبوع", "ساعة", "ليلة", "دقيقة"];
+
+/// The grammar's word for a currency sign or code next to an amount ($ → دولار, € → يورو, USD → دولار أمريكي).
+fn ar_cur_word(cur: &str, after: bool) -> String {
+    let base = words("1000000000", "ar");
+    let said = words(&if after { format!("1000000000 {cur}") } else { format!("{cur}1000000000") }, "ar");
+    said.strip_prefix(base.as_str()).map_or(String::new(), |r| r.trim_matches(crate::text::is_py_space).to_string())
+}
+
+fn ar_groups(t: String, c: &mut Ctx) -> String {
+    let pat = concat!(
+        r"(?<![\w.,/:+\-–])(?<!\d[ \x{A0}\x{202F}])[1-9]\d{0,2}(?:[ \x{A0}\x{202F}]\d{3})+(?!\d|[.,]\d{3})",
+        r"(?![ \x{A0}\x{202F}]\d)"
+    );
+    let after = format!(r"[ \x{{A0}}\x{{202F}}]?(?:{AR_SIGN}|{AR_CODE}|[^\W\d_])");
+    c.sub(&rx(pat), &t, |m| {
+        let w = m.get(0).expect("group 0");
+        let gaps = w.as_str().chars().filter(|&ch| matches!(ch, ' ' | '\u{a0}' | '\u{202f}')).count();
+        if gaps < 2
+            && !super::super::search(r"[$€£¥₩₱฿₫₹] ?$", &t[..w.start()])
+            && !matches_at_start(&after, &t[w.end()..])
+        {
+            return None;
+        }
+        Some(w.as_str().chars().map(|ch| if matches!(ch, ' ' | '\u{a0}' | '\u{202f}') { ',' } else { ch }).collect())
+    })
+}
+
+fn ar_big(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"(?:(?<![\w.,)\]])(-))?(?<![\w.,])(?:({AR_SIGN}) ?|(?<![A-Za-z])({AR_CODE}) ?)?([1-9]\d{{0,2}}(?:,\d{{3}}){{4}}|[1-9]\d{{12,14}})(?![\d,]|\.\d)(?: ?({AR_SIGN}|{AR_CODE})(?![A-Za-z]))?"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        let n = py_int(&g(m, 4).replace(',', ""));
+        if !(10u128.pow(12)..10u128.pow(15)).contains(&n) {
+            return None;
+        }
+        let (k, rest) = (n / 10u128.pow(12), n % 10u128.pow(12));
+        let mut out = words(&(k * 10u128.pow(9)).to_string(), "ar").replace("مليار", "تريليون");
+        if rest != 0 {
+            out = format!("{out} و{}", words(&rest.to_string(), "ar"));
+        }
+        let cur = [g(m, 2), g(m, 3), g(m, 5)].into_iter().find(|x| !x.is_empty()).unwrap_or("");
+        if !cur.is_empty() {
+            out = format!("{} {}", construct(&out), ar_cur_word(cur, !g(m, 5).is_empty()));
+        }
+        Some(format!("{}{out}", if g(m, 1).is_empty() { "" } else { "سالب " }))
+    })
+}
+
+fn ar_money(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,])(\d+),(\d{{1,2}})(?=\s?(?:{AR_SIGN}|{AR_CODE}(?![A-Za-z])))");
+    let t = c.sub_tpl(&rx(&pat), &t, r"\1.\2");
+    let t = c.sub_tpl(&rx(&format!(r"(?<={AR_SIGN})(\d+),(\d{{1,2}})(?![\d,])")), &t, r"\1.\2");
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,])({AR_SIGN}?\d[\d,]*(?:\.\d+)?) ?[~～〜] ?(?={AR_SIGN}?\d)")), &t, r"\1-")
+}
+
+fn ar_per(t: String, c: &mut Ctx) -> String {
+    let money = format!(
+        r"(?<![\w.,])({AR_SIGN} ?\d[\d,]*(?:\.\d+)?|(?<![A-Za-z]){AR_CODE} ?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)? ?(?:{AR_SIGN}|{AR_CODE}(?![A-Za-z])|{AR_CUR_WORD}(?!\w)))"
+    );
+    let pat = format!(r"{money} ?/ ?([^\W\d_]+)");
+    c.sub(&rx(&pat), &t, |m| {
+        if !words(&m[0], "ar").contains('/') {
+            return None; // the grammar reads it (100 €/شهر → مئة يورو في الشهر)
+        }
+        let w = g(m, 2);
+        let bare = w.strip_prefix("ال").unwrap_or(w);
+        if AR_TIME.contains(&bare) {
+            return Some(format!("{} في ال{bare}", g(m, 1)));
+        }
+        if w.starts_with("لل") || w.starts_with("لكل") {
+            return Some(format!("{} {w}", g(m, 1)));
+        }
+        Some(format!("{} لكل {bare}", g(m, 1)))
+    })
+}
 
 fn ar_proclitic(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![\w\ue001])([وف][بلك]?|[بلك])ـ*(?=\d)"), &t, |m| {

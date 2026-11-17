@@ -2,7 +2,9 @@
 //!
 //! The first half holds the helpers the Indic modules share (mr, gu, pa, bn, or and ur call them with their own
 //! tables): am/pm, clock times before a written hour word, years, the spoken minus, Latin words glued to a number,
-//! ranges, scores, halves before lakh/crore, regnal numerals and numbers glued to a postposition.
+//! ranges, scores, halves before lakh/crore, regnal numerals and numbers glued to a postposition; and, for all but or,
+//! money (the minus before a currency sign, money ranges, currency codes, per-unit prices) and grouped numbers (digits
+//! grouped with spaces, 14 and 15 digits, commas before a unit).
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -10,21 +12,27 @@ use std::sync::{LazyLock, Mutex};
 use fancy_regex::Captures;
 
 #[allow(unused_imports)]
-use super::super::{Ctx, g, py_int, rx, search, tpl};
+use super::super::{Ctx, g, py_int, py_int_str, py_strip, rx, search, tpl};
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("hi.space-groups", hi_space_groups),
+    ("hi.rupee", hi_rupee),
     ("hi.glued", hi_glued),
     ("hi.iso-date", hi_iso_date),
     ("hi.ampm", hi_ampm),
     ("hi.clock-hourword", hi_clock),
+    ("hi.money-range", hi_money_range),
     ("hi.minus", hi_minus),
     ("hi.latin-number", hi_latin_number),
     ("hi.score", hi_score),
     ("hi.range", hi_range),
+    ("hi.per", hi_per),
+    ("hi.codes", hi_codes),
     ("hi.half-scale", hi_half_scale),
     ("hi.units", hi_units),
+    ("hi.unit-groups", hi_unit_groups),
     ("hi.regnal", hi_regnal),
 ];
 
@@ -330,12 +338,14 @@ fn leading_zero(s: &str) -> bool {
     s.chars().next().is_some_and(|ch| py_int(&ch.to_string()) == 0)
 }
 
-/// `5-10 साल` -> `5 से 10 साल`: two plain ascending numbers joined by a hyphen or en dash, followed by a word
-/// (not a postposition or verb) or %, are a range.
-pub(super) fn ranges(t: String, c: &mut Ctx, w: &str, connector: &str, stop: &[&str]) -> String {
+/// `5-10 साल` -> `5 से 10 साल`: two plain ascending numbers joined by a hyphen or en dash (`dashes`; also ~),
+/// followed by a word (not a postposition or verb) or %, are a range.
+pub(super) fn ranges(t: String, c: &mut Ctx, w: &str, connector: &str, stop: &[&str], dashes: &str) -> String {
     let pat = [
         NOT_NUM_BEFORE,
-        r"(\d{1,7})(\s?)[-–](\s?)(\d{1,7})",
+        r"(\d{1,7})(\s?)",
+        dashes,
+        r"(\s?)(\d{1,7})",
         NOT_NUM_AFTER,
         r"(?=\s?%|\s(?!(?:",
         &alt(stop),
@@ -482,9 +492,302 @@ pub(super) fn glued(t: String, c: &mut Ctx, lang: &str, w: &str, postpositions: 
     })
 }
 
+// --------------------------------------------------------------------------- money: signs, codes, amounts
+// (hi, mr, gu, pa, bn, ur; or has its own)
+
+macro_rules! money_codes {
+    () => {
+        "INR|PKR|BDT|NPR|LKR|USD|EUR|GBP|JPY|CNY|AED|SAR|HKD|SGD|AUD|CAD|CHF|MYR|THB"
+    };
+}
+
+/// A currency sign or code before an amount (with an optional space), and one after an amount.
+pub(super) const MONEY_SIGN: &str =
+    concat!(r"(?:[₹€$£¥৳₨] ?|(?<![A-Za-z])(?:Rs\.|Rs|Tk\.|Tk|", money_codes!(), r")(?![A-Za-z]) ?)");
+pub(super) const MONEY_AFTER: &str = concat!(r"(?:[₹€$£¥৳₨]|(?:Rs\.|Rs|Tk\.|Tk|", money_codes!(), r")(?![A-Za-z]))");
+pub(super) const AMOUNT: &str = r"\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?";
+pub(super) const DASH: &str = "[-–—~～〜]";
+pub(super) const SP: &str = "[ \u{a0}\u{202f}]";
+
+fn is_sp(ch: char) -> bool {
+    matches!(ch, ' ' | '\u{a0}' | '\u{202f}')
+}
+
+/// The grammar leaves part of `s` unread (a sign, code, digit, dash, ~, slash, period or comma is left in its
+/// reading).
+pub(super) fn money_wrong(s: &str, lang: &str) -> bool {
+    search(r"[₹€$£¥৳₨~～〜\-–—/.,0-9A-Za-z]", &words(s, lang))
+}
+
+/// `float(x.replace(",", ""))` (any `\d` digits).
+pub(super) fn amount_value(x: &str) -> f64 {
+    let (ip, fp) = x.split_once('.').unwrap_or((x, ""));
+    let frac = if fp.is_empty() { String::new() } else { py_int_str(&format!("1{fp}"))[1..].to_string() };
+    format!("{}.{frac}0", py_int_str(ip)).parse::<f64>().unwrap_or(0.0)
+}
+
+/// The grammar's word for a currency sign or code next to an amount (₹ -> रुपए), or '' when it has none.
+pub(super) fn cur_word(cur: &str, lang: &str, after: bool) -> String {
+    let base = words("1000", lang);
+    let spaced = cur.chars().next_back().is_some_and(char::is_alphabetic) || cur.ends_with('.');
+    let said =
+        words(&if after { format!("1000 {cur}") } else { format!("{cur}{}1000", if spaced { " " } else { "" }) }, lang);
+    let rest = said.strip_prefix(base.as_str()).map_or("", py_strip);
+    if search(r"[A-Za-z0-9₹€$£¥৳₨]", rest) { String::new() } else { rest.to_string() }
+}
+
+/// `2 000 000 €` -> `2000000 €`: digits grouped by threes with spaces are one number, with a currency sign before or
+/// a currency or Latin unit after, or with three groups or more after the first.
+pub(super) fn space_groups(t: String, c: &mut Ctx) -> String {
+    let lead = ["(?<![\\w.,+])(?<!\\d", SP, ")"].concat();
+    let tail = ["(?!\\d|", SP, r"\d|[.,]\d)"].concat();
+    let join = |s: &str| s.chars().filter(|&ch| !is_sp(ch)).collect::<String>();
+    let t = c.sub(&rx(&[&lead, r"([1-9]\d{0,2}(?:", SP, r"\d{3}){3,}(?:\.\d+)?)", &tail].concat()), &t, |m| {
+        Some(join(g(m, 1)))
+    });
+    let t = c.sub(
+        &rx(&[&lead, "(", MONEY_SIGN, r")([1-9]\d{0,2}(?:", SP, r"\d{3})+(?:\.\d+)?)", &tail].concat()),
+        &t,
+        |m| Some(format!("{}{}", g(m, 1), join(g(m, 2)))),
+    );
+    c.sub(
+        &rx(&[
+            &lead,
+            r"([1-9]\d{0,2}(?:",
+            SP,
+            r"\d{3})+(?:\.\d+)?)",
+            &tail,
+            "(?=",
+            SP,
+            "?(?:",
+            MONEY_AFTER,
+            r"|[A-Za-z]))",
+        ]
+        .concat()),
+        &t,
+        |m| Some(join(g(m, 1))),
+    )
+}
+
+/// 14 and 15 digits (plain or grouped with commas) read in kharab (10^11) with the rest after it; a currency sign or
+/// code before or after is said after the number, a minus before it as `minus_word`.
+pub(super) fn big(t: String, c: &mut Ctx, lang: &str, minus_word: &str) -> String {
+    let one = words("1", lang);
+    let kh = words("100000000000", lang);
+    let kharab = kh.strip_prefix(&format!("{one} ")).unwrap_or(&kh).to_string();
+    let pat = [
+        r"(?:(?<![\w.,)\]])([-−]))?(?<![\w.,])(",
+        MONEY_SIGN,
+        r")?([1-9]\d{0,2}(?:,\d{2,3}){4,6}|[1-9]\d{13,14})(?![\d,]|\.\d)(?: ?(",
+        MONEY_AFTER,
+        "))?",
+    ]
+    .concat();
+    c.sub(&rx(&pat), &t, |m| {
+        let n = py_int(g(m, 3));
+        if !(10u128.pow(13)..10u128.pow(16)).contains(&n) {
+            return None;
+        }
+        let (k, rest) = (n / 10u128.pow(11), n % 10u128.pow(11));
+        let mut out = format!("{} {kharab}", words(&k.to_string(), lang));
+        if rest != 0 {
+            out = format!("{out} {}", words(&rest.to_string(), lang));
+        }
+        let cur = py_strip(if g(m, 2).is_empty() { g(m, 4) } else { g(m, 2) });
+        if !cur.is_empty() {
+            let cw = cur_word(cur, lang, !g(m, 4).is_empty());
+            if cw.is_empty() {
+                return None;
+            }
+            out = format!("{out} {cw}");
+        }
+        Some(if g(m, 1).is_empty() { out } else { format!("{minus_word} {out}") })
+    })
+}
+
+/// `-₹500`, `-€5`, `-Rs 500`, `₹-500`, `Rs -500` -> `<word> ₹500`: the spoken minus before a currency sign or code
+/// too; not a dash between two amounts.
+pub(super) fn money_minus(t: String, c: &mut Ctx, word: &str, w: &str) -> String {
+    let t = c.sub(&rx(&[r"(?<![\w.,])(", MONEY_SIGN, r")[-−](?=\d)"].concat()), &t, |m| {
+        Some(format!("{word} {}", g(m, 1)))
+    });
+    c.sub(
+        &rx(&[r"(?<![\w.,)\]\-−+*/=^])(?<!", w, r")(?<![\d₹€$£¥৳₨] )[-−](?=", MONEY_SIGN, r"\d)"].concat()),
+        &t,
+        |_| Some(format!("{word} ")),
+    )
+}
+
+/// `$5~10`, `₹5-10`, `5-10 €` -> `5 <conn> $10`, `5 <conn> 10 €`: a range of amounts is read with the range word and
+/// the currency once (where the grammar leaves the dash or ~ unread); before lakh/crore the currency goes after the
+/// scale (a first amount with decimals keeps its scale too).
+pub(super) fn money_range(t: String, c: &mut Ctx, lang: &str, conn: &str, w: &str, scales: &[&str]) -> String {
+    let sc = ["(?:", &alt(scales), ")(?!", w, ")"].concat();
+    let pat = [
+        r"(?<![\w.,])(",
+        MONEY_SIGN,
+        ")(",
+        AMOUNT,
+        r") ?",
+        DASH,
+        r" ?(",
+        MONEY_SIGN,
+        ")?(",
+        AMOUNT,
+        r")(?![\d.,]\d|\d)((?:\s?",
+        &sc,
+        r")(?:\s",
+        &sc,
+        r")*)?(?! ?[A-Za-z])",
+    ]
+    .concat();
+    let t = c.sub(&rx(&pat), &t, |m| {
+        let (a, b, scale) = (g(m, 2), g(m, 4), g(m, 5));
+        if (!g(m, 3).is_empty() && py_strip(g(m, 3)) != py_strip(g(m, 1))) || amount_value(a) >= amount_value(b) {
+            return None;
+        }
+        if !scale.is_empty() {
+            let cw = currency_word(py_strip(g(m, 1)), lang).filter(|s| !s.is_empty())?;
+            return Some(format!("{a}{} {conn} {b}{scale} {cw}", if a.contains('.') { scale } else { "" }));
+        }
+        if !money_wrong(&m[0], lang) {
+            return None;
+        }
+        Some(format!("{a} {conn} {}{b}", g(m, 1)))
+    });
+    let pat = [r"(?<![\w.,\-–—~～〜])(", AMOUNT, r") ?", DASH, r" ?(", AMOUNT, r") ?(", MONEY_AFTER, ")"].concat();
+    c.sub(&rx(&pat), &t, |m| {
+        if amount_value(g(m, 1)) >= amount_value(g(m, 2)) || !money_wrong(&m[0], lang) {
+            return None;
+        }
+        Some(format!("{} {conn} {} {}", g(m, 1), g(m, 2), g(m, 3)))
+    })
+}
+
+/// `NPR 500`, `2.5 PKR` -> `500 नेपाली रुपए`, `2 पाकिस्तानी रुपए 50 पैसे`: currency codes and signs the grammar
+/// leaves unread or misreads (`table`: code, currency words, minor unit) in words after the amount; before
+/// lakh/crore after the scale words.
+pub(super) fn codes(
+    t: String,
+    c: &mut Ctx,
+    lang: &str,
+    w: &str,
+    table: &[(&str, &str, &str)],
+    scales: &[&str],
+) -> String {
+    let sc = ["(?:", &alt(scales), ")(?!", w, ")"].concat();
+    let keys: Vec<&str> = table.iter().map(|x| x.0).collect();
+    let keys = alt(&keys);
+    let pat = [
+        r"(?<![\w.,])(?:(",
+        &keys,
+        r") ?(",
+        AMOUNT,
+        r")(?![\d.,]\d|\d)((?:\s?",
+        &sc,
+        r")(?:\s",
+        &sc,
+        r")*)?|(",
+        AMOUNT,
+        r") ?(",
+        &keys,
+        r"))(?![A-Za-z])",
+    ]
+    .concat();
+    c.sub(&rx(&pat), &t, |m| {
+        let code = if g(m, 1).is_empty() { g(m, 5) } else { g(m, 1) };
+        let amount = if g(m, 2).is_empty() { g(m, 4) } else { g(m, 2) };
+        let scale = g(m, 3);
+        let &(_, word, minor) = table.iter().find(|x| x.0 == code)?;
+        if !scale.is_empty() {
+            return Some(format!("{amount}{scale} {word}"));
+        }
+        if !money_wrong(&m[0], lang) {
+            return None;
+        }
+        let (head, dec) = amount.split_once('.').unwrap_or((amount, ""));
+        if !dec.is_empty() && !minor.is_empty() {
+            let two: String = format!("{dec}0").chars().take(2).collect();
+            let cents = py_int(&two);
+            return Some(if cents != 0 { format!("{head} {word} {cents} {minor}") } else { format!("{head} {word}") });
+        }
+        Some(format!("{amount} {word}"))
+    })
+}
+
+/// The grammar's word for a Latin unit after 2 (kg -> किलोग्राम), or None.
+pub(super) fn unit_word(u: &str, lang: &str) -> Option<String> {
+    let (two, said) = (words("2", lang), words(&format!("2 {u}"), lang));
+    let rest = said.strip_prefix(&format!("{two} ")).unwrap_or("");
+    (!rest.is_empty() && !search(r"[A-Za-z0-9]", rest)).then(|| rest.to_string())
+}
+
+/// `100 €/महीना` -> `100 € प्रति महीना`: the slash after an amount of money is read as `per` (where the grammar
+/// leaves it unread); a Latin unit after it in the grammar's words. The `/-` or `/=` written after a price
+/// (`₹500/-`) is not said.
+pub(super) fn per_unit(t: String, c: &mut Ctx, lang: &str, per: &str, w: &str, cur_words: &[&str]) -> String {
+    let money = [
+        r"(?<![\w.,])(",
+        MONEY_SIGN,
+        "(?:",
+        AMOUNT,
+        r")|(?:",
+        AMOUNT,
+        r") ?(?:",
+        MONEY_AFTER,
+        "|(?:",
+        &alt(cur_words),
+        ")(?!",
+        w,
+        ")))",
+    ]
+    .concat();
+    let t = c.sub(&rx(&[r"(?<![\w.,/])(", AMOUNT, r")/[-=](?![\w\-=/])"].concat()), &t, |m| Some(g(m, 1).to_string()));
+    c.sub(&rx(&[&money, r" ?/ ?(", w, r"+|[A-Za-z]+[²³]?)(?![\w²³])"].concat()), &t, |m| {
+        if !words(&m[0], lang).contains('/') {
+            return None;
+        }
+        let unit = g(m, 2);
+        let unit = if unit.starts_with(|ch: char| ch.is_ascii_alphabetic()) {
+            unit_word(unit, lang).unwrap_or_else(|| unit.to_string())
+        } else {
+            unit.to_string()
+        };
+        Some(format!("{} {per} {unit}", g(m, 1)))
+    })
+}
+
+/// `2,000 km` -> `2000 km`: a number grouped with commas before a Latin unit loses its commas where the grammar
+/// leaves the unit unread after the grouped form and reads the plain one.
+pub(super) fn unit_groups(t: String, c: &mut Ctx, lang: &str) -> String {
+    let pat = r"(?<![\w.,])(\d{1,3}(?:,\d{2,3})+)((?:\.\d+)? ?[A-Za-z]+[²³]?(?:/[A-Za-z]+[²³]?)?)(?![\w²³/])";
+    c.sub(&rx(pat), &t, |m| {
+        let plain = format!("{}{}", g(m, 1).replace(',', ""), g(m, 2));
+        let new = words(&plain, lang);
+        if search(r"[A-Za-z0-9,]", &new) || new == words(&m[0], lang) {
+            return None;
+        }
+        Some(plain)
+    })
+}
+
 // ================================================================================================= hi
 
 const HI_POST: &[&str] = &["में", "का", "की", "के", "को", "से", "तक", "पर", "ने"];
+const HI_SCALES: &[&str] = &["लाख", "करोड़", "हज़ार", "हजार", "अरब", "खरब"];
+
+fn hi_space_groups(t: String, c: &mut Ctx) -> String {
+    space_groups(t, c)
+}
+
+fn hi_rupee(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&["(?<!", DEVA, r")(?:रु|रू)\.?\s?(?=\d)"].concat()), &t, |_| Some("₹".to_string()));
+    c.sub_tpl(&rx(&[r"(?<=\d)(\s?)(?:रु|रू)(?:\.(?![ \t]*(?:\n|$)))?(?!", DEVA, ")"].concat()), &t, r"\1रुपए")
+}
+
+fn hi_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, "hi", "से", DEVA, HI_SCALES)
+}
 
 fn hi_glued(t: String, c: &mut Ctx) -> String {
     glued(t, c, "hi", DEVA, HI_POST, false)
@@ -517,6 +820,7 @@ fn hi_clock(t: String, c: &mut Ctx) -> String {
 }
 
 fn hi_minus(t: String, c: &mut Ctx) -> String {
+    let t = money_minus(t, c, "माइनस", DEVA);
     minus(
         t,
         c,
@@ -562,7 +866,31 @@ fn hi_score(t: String, c: &mut Ctx) -> String {
 }
 
 fn hi_range(t: String, c: &mut Ctx) -> String {
-    ranges(t, c, DEVA, "से", &["से", "तक", "को", "का", "की", "के", "में", "पर", "ने", "है", "हैं", "था", "थी", "थे", "और", "या"])
+    ranges(
+        t,
+        c,
+        DEVA,
+        "से",
+        &["से", "तक", "को", "का", "की", "के", "में", "पर", "ने", "है", "हैं", "था", "थी", "थे", "और", "या"],
+        "[-–~～〜]",
+    )
+}
+
+const HI_CODES: &[(&str, &str, &str)] = &[
+    ("NPR", "नेपाली रुपए", "पैसे"),
+    ("LKR", "श्रीलंकाई रुपए", "सेंट"),
+    ("PKR", "पाकिस्तानी रुपए", "पैसे"),
+    ("MYR", "मलेशियाई रिंगिट", "सेन"),
+    ("Tk.", "टका", "पैसे"),
+    ("Tk", "टका", "पैसे"),
+];
+
+fn hi_codes(t: String, c: &mut Ctx) -> String {
+    codes(t, c, "hi", DEVA, HI_CODES, HI_SCALES)
+}
+
+fn hi_per(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, "hi", "प्रति", DEVA, &["रुपये", "रुपए", "रुपया"])
 }
 
 fn hi_half_scale(t: String, c: &mut Ctx) -> String {
@@ -600,6 +928,10 @@ fn hi_units(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(&[r"(?<=\d)(\s?)(", &alt(&keys), r")(?![\w/]|", DEVA, ")"].concat()), &t, |m| {
         HI_UNITS.iter().find(|&&(k, _)| k == g(m, 2)).map(|&(_, v)| format!("{}{v}", g(m, 1)))
     })
+}
+
+fn hi_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "hi")
 }
 
 pub(super) const SANSKRIT_ORD: &[&str] =

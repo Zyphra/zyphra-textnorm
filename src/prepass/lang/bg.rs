@@ -8,7 +8,8 @@
 use fancy_regex::Captures;
 
 #[allow(unused_imports)]
-use super::super::{Ctx, g, py_int, rx, search};
+use super::super::{Ctx, g, py_int, re_escape, rx, search};
+use super::da::pad_cents;
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 use crate::text::py_strip;
@@ -17,8 +18,15 @@ pub(super) const RULES: &[LangRule] = &[
     ("bg.decade", bg_decade),
     ("bg.date-range", bg_date_range),
     ("bg.ordinal-def", bg_ordinal_def),
+    ("bg.money-range", bg_money_range),
+    ("bg.money-decimal", bg_money_decimal),
     ("bg.range", bg_range),
     ("bg.scale", bg_scale),
+    ("bg.big-words", bg_big_words),
+    ("bg.money-groups", bg_money_groups),
+    ("bg.big-groups", bg_big_groups),
+    ("bg.money-code", bg_money_code),
+    ("bg.per-unit", bg_per_unit),
     ("bg.units", bg_units),
     ("bg.half", bg_half),
     ("bg.gender", bg_gender),
@@ -254,6 +262,197 @@ fn bg_scale(t: String, c: &mut Ctx) -> String {
     })
 }
 
+const GROUPED: &str = r"[1-9]\d{0,2}(?:[ \x{A0}]\d{3}){1,3}";
+const EURO_AFTER: &str = r"(?:€|EUR|MXN|PHP|₱)(?![\w])";
+
+fn ungroup(s: &str) -> String {
+    s.chars().filter(|&ch| !matches!(ch, ' ' | '\u{a0}')).collect()
+}
+
+fn bg_money_groups(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"{SKIP}{LB}(?<!\d{SP})(?<!~)(-?)(?:({GROUPED}|\d{{1,12}})({SP}?[-–—]{SP}?))?({GROUPED}|\d{{1,12}})(?=(?:,\d{{1,2}})?{SP}?{EURO_AFTER})"
+    );
+    let t = c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let out = format!("{}{}{}{}", g(m, 1), ungroup(g(m, 2)), g(m, 3), ungroup(g(m, 4)));
+        if out == m[0] { None } else { Some(out) }
+    });
+    let pat = format!(r"{SKIP}(?<![\w])(€|EUR)({SP}?)({GROUPED})(?=(?:,\d{{2}})?{RB})");
+    c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        Some(format!("{}{}{}", g(m, 1), g(m, 2), ungroup(g(m, 3))))
+    })
+}
+
+/// A number from a billion up to 15 digits in words: the trillions and billions written here, the rest read by the
+/// grammar, with its “и” before a last part below a million (един милиард и сто).
+fn bg_big(n: u64) -> Option<String> {
+    let mut parts = Vec::new();
+    let mut rest = n;
+    for (size, one, many) in [(1_000_000_000_000u64, "трилион", "трилиона"), (1_000_000_000, "милиард", "милиарда")]
+    {
+        let k = rest / size;
+        rest %= size;
+        if k == 1 {
+            parts.push(format!("един {one}"));
+        } else if k > 0 {
+            parts.push(format!("{} {many}", card(k, "m")));
+        }
+    }
+    if rest == 0 {
+        return Some(parts.join(" "));
+    }
+    let low = words(&rest.to_string(), "bg");
+    if search(r"\d", &low) {
+        return None;
+    }
+    let conn = if rest < 1_000_000 && words(&(1_000_000 + rest).to_string(), "bg").starts_with("един милион и ")
+    {
+        " и "
+    } else {
+        " "
+    };
+    Some(format!("{}{conn}{low}", parts.join(" ")))
+}
+
+const BIG_CUR: &str = r"лв\.?|€|EUR|\$|USD|BGN";
+
+fn bg_big_words(t: String, c: &mut Ctx) -> String {
+    let pat = format!(
+        r"{SKIP}{LB}(?<!\d{SP})(?:([1-9]\d{{0,2}}(?:{SP}\d{{3}}){{3,4}})|([1-9]\d{{9,14}})){RB}(?!{SP}\d)(?:({SP}?)({BIG_CUR})(?![\w]))?"
+    );
+    c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let num = if g(m, 1).is_empty() { g(m, 2) } else { g(m, 1) };
+        let n = to_int(num);
+        let cur = g(m, 4);
+        if !g(m, 2).is_empty() && n >= 1_000_000_000_000 && cur.is_empty() {
+            return None;
+        }
+        if n < 1_000_000_000_000 && !search(r"\d", &words(&n.to_string(), "bg")) {
+            return None;
+        }
+        let mut out = bg_big(n)?;
+        if !cur.is_empty() {
+            let base = words("5000000", "bg");
+            let w = words(&format!("5000000 {cur}"), "bg");
+            if !w.starts_with(&format!("{base} ")) || search(r"\d", &w) {
+                return None;
+            }
+            out = format!("{out} {}{}", &w[base.len() + 1..], drop_dot(cur, &t[end(m)..]));
+        }
+        Some(out)
+    })
+}
+
+fn bg_code(code: &str) -> (&'static str, &'static str, &'static str) {
+    match code {
+        "RON" => ("f", "румънска лея", "румънски леи"),
+        "RSD" => ("m", "сръбски динар", "сръбски динара"),
+        _ => ("m", "македонски денар", "македонски денара"),
+    }
+}
+
+fn bg_money_code(t: String, c: &mut Ctx) -> String {
+    let say = |code: &str, num: &str| -> String {
+        let (gnd, one, many) = bg_code(code);
+        let n = to_int(num);
+        format!("{} {}", card(n, gnd), if n == 1 { one } else { many })
+    };
+    let p = format!(r"{SKIP}{LB}({NUM}){RB}{SP}?(RON|RSD|MKD)(?![\w])");
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| say(g(m, 2), g(m, 1))));
+    let p = format!(r"{SKIP}(?<![\w])(RON|RSD|MKD){SP}?({NUM}){RB}");
+    c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| say(g(m, 1), g(m, 2))))
+}
+
+const BG_PER: &[(&str, &str)] = &[
+    ("месец", "на месец"),
+    ("мес.", "на месец"),
+    ("мес", "на месец"),
+    ("ден", "на ден"),
+    ("денонощие", "на денонощие"),
+    ("седмица", "на седмица"),
+    ("година", "на година"),
+    ("год.", "на година"),
+    ("нощувка", "на нощувка"),
+    ("нощ", "на нощ"),
+    ("човек", "на човек"),
+    ("бр.", "на брой"),
+    ("брой", "на брой"),
+    ("кв. м", "на квадратен метър"),
+    ("кв.м", "на квадратен метър"),
+    ("м²", "на квадратен метър"),
+    ("м2", "на квадратен метър"),
+    ("л", "на литър"),
+    ("км", "на километър"),
+    ("м", "на метър"),
+    ("час", "на час"),
+];
+
+fn bg_per_unit(t: String, c: &mut Ctx) -> String {
+    let mut sorted: Vec<&(&str, &str)> = BG_PER.iter().collect();
+    sorted.sort_by_key(|x| std::cmp::Reverse(x.0.chars().count()));
+    let alt: Vec<String> = sorted.iter().map(|x| re_escape(x.0)).collect();
+    let pat = format!(r"{SKIP}(\d{SP}?)(лв\.|лв|€|\$|EUR|USD|BGN)/({})(?![\w²])", alt.join("|"));
+    c.sub(&rx(&pat), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let unit = g(m, 3);
+        let spoken = BG_PER.iter().rev().find(|x| x.0 == unit)?.1;
+        Some(format!("{}{} {spoken}{}", g(m, 1), g(m, 2), drop_dot(unit, &t[end(m)..])))
+    })
+}
+
+fn bg_big_groups(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"{SKIP}{LB}(?<!\d{SP})([1-9]\d{{0,2}}(?:{SP}\d{{3}}){{3}}){RB}(?!{SP}\d)");
+    c.sub(&rx(&pat), &t, |m| if skipped(m) { None } else { Some(ungroup(g(m, 1))) })
+}
+
+const BG_CUR: &str = r"лв\.?|€|EUR|\$|USD|BGN|£|GBP|CHF|TRY|₺|₽|RUB";
+const BG_MINUS_CUR: &str = r"£|GBP|CHF|TRY|₺|₽|RUB";
+
+fn bg_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&format!(r"{SKIP}(?<=\d){SP}?~{SP}?(?=\d)")), &t, |m| (!skipped(m)).then(|| "–".to_string()));
+    let p = format!(r"{SKIP}(?<![\w.,\-−])(?<!\d{SP})(€|\$|£){SP}?[-−](?=\d)");
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("-{}", g(m, 1))));
+    let p = format!(r"{SKIP}{LB}({NUM})-({NUM}){RB}(?={SP}?(?:{BG_CUR})(?![\w]))");
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("{}–{}", g(m, 1), g(m, 2))));
+    let p =
+        format!(r"{SKIP}(?<![\w.,])(€|\$|£|EUR|USD){SP}?({NUM}){SP}?[-–]{SP}?({NUM}){RB}(?!{SP}?(?:{BG_CUR})(?![\w]))");
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("{}–{} {}", g(m, 2), g(m, 3), g(m, 1))));
+    let p = format!(
+        r"{SKIP}(?<![\w.,)\]\-−+*/=^])[-−](?=(?:{BG_MINUS_CUR}){SP}?\d|(?:{NUM})(?:,\d+)?{SP}?(?:{BG_MINUS_CUR})(?![\w]))"
+    );
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| "минус ".to_string()));
+    let p = format!(r"{SKIP}(?<![\w.])(?<!\d{SP})(лв|BGN|лв\.){SP}?({NUM}(?:,\d{{1,2}})?){RB}");
+    c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("{} {}", g(m, 2), g(m, 1))))
+}
+
+const BG_CENTS: &str = r"лв\.?|€|EUR|\$|USD|BGN";
+
+fn bg_money_decimal(t: String, c: &mut Ctx) -> String {
+    let p = format!(r"{SKIP}{LB}(\d+,\d{{1,2}}){SP}?[-–]{SP}?(\d+(?:,\d{{1,2}})?)({SP}?)({BG_CENTS})(?![\w])");
+    let t = c.sub(&rx(&p), &t, |m| {
+        if skipped(m) {
+            return None;
+        }
+        let (sp, cur) = (g(m, 3), g(m, 4));
+        Some(format!("от {}{sp}{cur} до {}{sp}{cur}", pad_cents(g(m, 1)), pad_cents(g(m, 2))))
+    });
+    let p = format!(r"{SKIP}{LB}({NUM}),(\d)(?={SP}?(?:{BG_CENTS})(?![\w]))");
+    let t = c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("{},{}0", g(m, 1), g(m, 2))));
+    let p = format!(r"{SKIP}(?<![\w])(€|\$|EUR|USD)({SP}?)(\d+),(\d){RB}");
+    c.sub(&rx(&p), &t, |m| (!skipped(m)).then(|| format!("{}{}{},{}0", g(m, 1), g(m, 2), g(m, 3), g(m, 4))))
+}
+
 fn bg_range(t: String, c: &mut Ctx) -> String {
     let pat = format!(r"{SKIP}{LB}({NUM}){SP}?[–—]{SP}?({NUM}){RB}(?:({SP}?){UNIT_RX})?(?={SP}?\S)");
     c.sub(&rx(&pat), &t, |m| {
@@ -306,11 +505,14 @@ fn unit(tok: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "кв. км" | "кв.км" => Some(("m", "квадратен километър", "квадратни километра")),
         "куб. м" | "куб.м" => Some(("m", "кубичен метър", "кубични метра")),
         "г" => Some(("m", "грам", "грама")),
+        "т" => Some(("m", "тон", "тона")),
+        "ха" => Some(("m", "хектар", "хектара")),
+        "дка" => Some(("m", "декар", "декара")),
         _ => None,
     }
 }
 
-const UNIT_RX: &str = r"(кв\.[ \x{A0}]?км|кв\.[ \x{A0}]?м|куб\.[ \x{A0}]?м|мин\.?|сек\.?|ч\.?|г)(?![\w])(\.?)";
+const UNIT_RX: &str = r"(кв\.[ \x{A0}]?км|кв\.[ \x{A0}]?м|куб\.[ \x{A0}]?м|мин\.?|сек\.?|ч\.?|г|дка|ха(?!-)|т(?!\.[^\W\d_]))(?![\w])(\.?)";
 
 fn bg_units(t: String, c: &mut Ctx) -> String {
     let pat = format!(r"{SKIP}{LB}({NUM}){RB}{SP}?{UNIT_RX}");

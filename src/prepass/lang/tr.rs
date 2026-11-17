@@ -13,6 +13,12 @@ use super::{LangRule, digit_words, words};
 pub(super) const RULES: &[LangRule] = &[
     ("tr.minus-percent", tr_minus_percent),
     ("tr.thousands", tr_thousands),
+    ("tr.money-range", tr_money_range),
+    ("tr.money-decimal", tr_money_decimal),
+    ("tr.per-unit", tr_per_unit),
+    ("tr.money-words", tr_money_words),
+    ("tr.hectare", tr_hectare),
+    ("tr.money-dot", tr_money_dot),
     ("tr.speed", tr_speed),
     ("tr.percent", tr_percent),
     ("tr.unit-suffix", tr_unit_suffix),
@@ -251,4 +257,102 @@ fn tr_suffix(t: String, c: &mut Ctx) -> String {
 
 fn tr_minus_percent(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![\w.,)\]\-−+*/=^])[-−](?=\d+(?:,\d+)?\s?%)"), &t, |_| Some("eksi ".to_string()))
+}
+
+// ======================================================================================= money (Nov 16 b)
+
+/// Currencies the grammar reads after an amount, with kuruş/sent/peni after two decimals.
+const MONEY_CUR: &str = r"TL|₺|TRY|€|EUR|\$|USD|£|GBP|CHF";
+const MONEY_SIGN: &str = r"[$€£₺]";
+
+fn tr_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<=\d)((?: ?(?:{MONEY_CUR}))?) ?~ ?(?={MONEY_SIGN}?\d)")), &t, r"\1-");
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN})(\d+(?:,\d{{1,2}})?)-(\d+(?:,\d{{1,2}})?)(?![\d,.]?\d| ?(?:{MONEY_CUR})(?!\w)|['’])"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 2), g(m, 3), g(m, 1))),
+    )
+}
+
+fn tr_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])(\d+),(\d)(?= ?(?:{MONEY_CUR})(?![\w'’]))")), &t, |m| {
+        Some(format!("{},{}0", g(m, 1), g(m, 2)))
+    });
+    c.sub(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN})(\d+),(\d)(?![\d\w'’]|,\d)")), &t, |m| {
+        Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3)))
+    })
+}
+
+/// A slash after a price: the word that goes before the amount.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("ay", "aylık"),
+    ("gün", "günlük"),
+    ("saat", "saatlik"),
+    ("sa", "saatlik"),
+    ("h", "saatlik"),
+    ("yıl", "yıllık"),
+    ("hafta", "haftalık"),
+    ("gece", "gecelik"),
+    ("kişi", "kişi başı"),
+    ("adet", "adet başına"),
+    ("kg", "kilogram başına"),
+    ("gr", "gram başına"),
+    ("g", "gram başına"),
+    ("lt", "litre başına"),
+    ("l", "litre başına"),
+    ("m²", "metrekare başına"),
+    ("m2", "metrekare başına"),
+    ("km", "kilometre başına"),
+    ("kWh", "kilovatsaat başına"),
+    ("ton", "ton başına"),
+    ("m", "metre başına"),
+];
+
+fn tr_per_unit(t: String, c: &mut Ctx) -> String {
+    let mut ks: Vec<&str> = PER_UNIT.iter().map(|kv| kv.0).collect();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    let dens = ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|");
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN}\d+(?:,\d{{1,2}})?|\d+(?:,\d{{1,2}})? ?(?:{MONEY_CUR}))/({dens})(?![\w'’/²])"
+        )),
+        &t,
+        |m| {
+            let per = PER_UNIT.iter().find(|kv| kv.0 == g(m, 2))?.1;
+            Some(format!("{per} {}", g(m, 1)))
+        },
+    )
+}
+
+/// Neighbours' currencies the grammar leaves as typed.
+const OTHER_CUR: &[(&str, &str)] = &[
+    ("GEL", "gürcü larisi"),
+    ("BGN", "bulgar levası"),
+    ("IRR", "iran riyali"),
+    ("AZN", "azerbaycan manatı"),
+    ("IQD", "ırak dinarı"),
+    ("SYP", "suriye lirası"),
+];
+
+fn tr_money_words(t: String, c: &mut Ctx) -> String {
+    let codes = OTHER_CUR.iter().map(|kv| kv.0).collect::<Vec<_>>().join("|");
+    c.sub(&rx(&format!(r"(?<=\d)( ?)({codes})(?![\w'’])")), &t, |m| {
+        let w = OTHER_CUR.iter().find(|kv| kv.0 == g(m, 2))?.1;
+        Some(format!("{}{w}", g(m, 1)))
+    })
+}
+
+fn tr_hectare(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"(?<![\w.,])(\d+(?:,\d+)?)( ?)ha(?:{SUFFIX}|(?![\w'’²]))")), &t, |m| {
+        if m.get(3).is_some() {
+            return Some(format!("{} {}", words(g(m, 1), "tr"), attach("hektar", g(m, 3))));
+        }
+        Some(format!("{}{}hektar", g(m, 1), g(m, 2)))
+    })
+}
+
+fn tr_money_dot(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(r"(?<=\d)( ?)TL\.(?=[ \t]+[A-ZÇĞİÖŞÜ]|[ \t]*\n)"), &t, r"\1₺.")
 }

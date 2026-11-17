@@ -1,5 +1,6 @@
 //! Shared rules: the port of the workbench's `langrules/shared.py` (ids `all.*`): S05 leading zeros, S06 phone
-//! numbers, S18 operator words, S23 email addresses and URLs, S32 Unicode fractions. The words these rules write
+//! numbers, S18 operator words, S23 email addresses and URLs, S32 Unicode fractions, dollar signs with a country
+//! prefix (US$, HK$, A$, C$, NZ$, S$, NT$, R$). The words these rules write
 //! themselves (an address, a phone number, a code) are wrapped in U+E000 … U+E001 so the grammar passes them through.
 
 use super::super::{Ctx, chars_before, g, is_alnum, matches_at_start, rx, search};
@@ -8,6 +9,7 @@ use super::{LangRule, digit_words, words};
 /// Run right after `en.url`.
 pub(in crate::prepass) const EARLY: &[LangRule] = &[
     ("all.email-url", all_email_url),
+    ("all.dollar-prefix", all_dollar_prefix),
     ("all.operators", all_operators),
     ("all.phone", all_phone),
     ("all.plus-sign", all_plus_sign),
@@ -902,4 +904,1707 @@ fn all_operators(t: String, c: &mut Ctx) -> String {
         t = c.sub_tpl(&rx(r"(?<=[^\W\d_]) & (?=[^\W\d_])"), &t, &format!(" {and} "));
     }
     t
+}
+
+// ------------------------------------------------------------------------------------------------- dollar prefixes
+
+const DP_PREFIX: &[(&str, &str)] = &[
+    ("US", "US"),
+    ("HK", "HK"),
+    ("AU", "AU"),
+    ("CA", "CA"),
+    ("NZ", "NZ"),
+    ("SG", "SG"),
+    ("NT", "TW"),
+    ("A", "AU"),
+    ("C", "CA"),
+    ("S", "SG"),
+    ("R", "BR"),
+];
+const DP_COMMA: &[&str] = &[
+    "de", "es", "fr", "it", "pt", "nl", "pl", "tr", "uk", "cs", "da", "fi", "el", "nb", "ro", "sk", "bg", "ru", "sv",
+    "hu", "vi", "id", "ka",
+];
+const DP_SCALE: &[(&str, &str)] = &[
+    ("en", r"[ \x{A0}]?(?:million|billion|trillion|bn|mn|tn|m|b|k)"),
+    ("de", r"[ \x{A0}](?:Mio\.|Mrd\.|Millionen|Million|Milliarden|Milliarde|Billionen|Billion)"),
+    ("es", r"[ \x{A0}](?:mil millones|millones|millón|billones|billón|mil)"),
+    ("fr", r"[ \x{A0}](?:millions|million|milliards|milliard|billions|billion)"),
+    ("it", r"[ \x{A0}](?:milioni|milione|miliardi|miliardo|bilioni|bilione|mln|mld|mila)"),
+    ("pt", r"[ \x{A0}](?:milhões|milhão|bilhões|bilhão|trilhões|trilhão|mil|mi|bi|tri)"),
+    ("nl", r"[ \x{A0}](?:miljoen|miljard|biljoen|mln\.?|mld\.?)"),
+    ("pl", r"[ \x{A0}](?:mln|mld|bln|milionów|miliony|milion|miliardów|miliardy|miliard|bilionów|biliony|bilion)"),
+    ("tr", r"[ \x{A0}](?:milyon|milyar|trilyon|bin)"),
+    (
+        "uk",
+        r"[ \x{A0}](?:млн|млрд|трлн|мільйонів|мільйони|мільйон|мільярдів|мільярди|мільярд|трильйонів|трильйони|трильйон)",
+    ),
+    ("cs", r"[ \x{A0}](?:mil\.|mld\.|bil\.|milionů|miliony|milion|miliardy|miliard|bilionů|biliony|bilion)"),
+    ("sk", r"[ \x{A0}](?:mil\.|mld\.|bil\.|miliónov|milióny|milión|miliárd|miliardy|miliarda|biliónov|bilióny|bilión)"),
+    ("bg", r"[ \x{A0}](?:млн\.?|млрд\.?|трлн\.?|милиона|милион|милиарда|милиард|трилиона|трилион)"),
+    ("da", r"[ \x{A0}](?:mio\.|mia\.|mio|mia|millioner|million|milliarder|milliard|billioner|billion)"),
+    ("nb", r"[ \x{A0}](?:mill\.|mrd\.|mill|mrd|millioner|million|milliarder|milliard|billioner|billion)"),
+    ("fi", r"[ \x{A0}](?:milj\.|mrd\.|miljoonaa|miljoona|miljardia|miljardi|biljoonaa|biljoona)"),
+    (
+        "el",
+        r"[ \x{A0}](?:εκατ\.|δισ\.|τρισ\.|εκατομμύρια|εκατομμύριο|δισεκατομμύρια|δισεκατομμύριο|τρισεκατομμύρια|τρισεκατομμύριο)",
+    ),
+    ("ro", r"[ \x{A0}](?:milioane|milion|miliarde|miliard|trilioane|trilion|mil\.|mld\.)"),
+    ("he", r"[ \x{A0}](?:מיליון|מיליארד|טריליון)"),
+    ("th", r"[ \x{A0}]?(?:พันล้าน|ล้าน)"),
+    ("ka", r"[ \x{A0}](?:მილიონი|მილიარდი|ტრილიონი|მლნ|მლრდ)"),
+    ("ru", r"[ \x{A0}](?:млн|млрд|трлн)"),
+    ("hu", r"[ \x{A0}](?:millió|milliárd|billió)"),
+    ("ar", r"[ \x{A0}](?:مليون|مليار|تريليون)"),
+    ("ja", r"(?:万|億|兆)"),
+    ("zh", r"(?:万|亿|億|兆)"),
+    ("ko", r"(?:만|억|조)"),
+    ("ml", r"[ \x{A0}](?:ദശലക്ഷം|കോടി|ലക്ഷം)"),
+    ("pa", r"[ \x{A0}](?:ਮਿਲੀਅਨ|ਕਰੋੜ|ਲੱਖ|ਅਰਬ)"),
+    ("or", r"[ \x{A0}](?:ମିଲିୟନ|କୋଟି|ଲକ୍ଷ)"),
+    ("bn", r"[ \x{A0}](?:মিলিয়ন|কোটি|লাখ)"),
+    ("ta", r"[ \x{A0}](?:மில்லியன்|கோடி|லட்சம்)"),
+    ("kn", r"[ \x{A0}](?:ಮಿಲಿಯನ್|ಕೋಟಿ|ಲಕ್ಷ)"),
+    ("te", r"[ \x{A0}](?:మిలియన్|కోట్ల|కోటి|లక్షల|లక్ష)"),
+    ("ur", r"[ \x{A0}](?:ملین|کروڑ|لاکھ|ارب)"),
+    ("hi", r"[ \x{A0}](?:मिलियन|करोड़|लाख|अरब)"),
+    ("gu", r"[ \x{A0}](?:મિલિયન|કરોડ|લાખ|અબજ)"),
+    ("mr", r"[ \x{A0}](?:दशलक्ष|मिलियन|कोटी|लाख|अब्ज)"),
+    ("tl", r"[ \x{A0}](?:milyon|bilyon|trilyon)"),
+    ("ms", r"[ \x{A0}](?:juta|bilion|trilion|ribu)"),
+    ("id", r"[ \x{A0}](?:juta|miliar|triliun|ribu)"),
+    ("vi", r"[ \x{A0}](?:triệu|tỷ|nghìn|ngàn)"),
+    ("sv", r"[ \x{A0}](?:miljoner|miljon|miljarder|miljard|biljoner|biljon|mn|mdr)"),
+];
+const DP_FORM: &[(&str, &[(&str, How)])] = &[
+    (
+        "en",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "de",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "it",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "nl",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "pl",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "tr",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "uk",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "cs",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "sk",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "bg",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "da",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "nb",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "fi",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "el",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "ro",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "he",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "th",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "ka",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "ml",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "pa",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "or",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "hu",
+        &[
+            ("US", How::W),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    (
+        "es",
+        &[
+            ("US", How::T("US${n}")),
+            ("HK", How::W),
+            ("AU", How::W),
+            ("CA", How::W),
+            ("NZ", How::W),
+            ("SG", How::W),
+            ("TW", How::W),
+            ("BR", How::W),
+        ],
+    ),
+    ("pt", &[("HK", How::W), ("AU", How::W), ("CA", How::W), ("NZ", How::W), ("SG", How::W), ("TW", How::W)]),
+    (
+        "fr",
+        &[
+            ("US", How::T("{n} $")),
+            ("HK", How::T("{n} $ de Hong Kong")),
+            ("AU", How::Pair("{n} $ australien", "{n} $ australiens")),
+            ("CA", How::Pair("{n} $ canadien", "{n} $ canadiens")),
+            ("NZ", How::T("{n} $ néo-zélandais")),
+            ("SG", How::T("{n} $ de Singapour")),
+            ("TW", How::T("{n} $ taïwanais")),
+            ("BR", How::Pair("{n} réal brésilien", "{n} reais brésiliens")),
+        ],
+    ),
+    (
+        "ja",
+        &[
+            ("US", How::T("{n} USD")),
+            ("HK", How::T("{n} HKD")),
+            ("AU", How::T("{n} AUD")),
+            ("CA", How::T("{n} CAD")),
+            ("NZ", How::T("{n} NZD")),
+            ("SG", How::T("{n} SGD")),
+            ("TW", How::T("{n} TWD")),
+            ("BR", How::T("{n}ブラジルレアル")),
+        ],
+    ),
+    (
+        "zh",
+        &[
+            ("US", How::T("{n} USD")),
+            ("HK", How::T("{n} HKD")),
+            ("AU", How::T("{n} AUD")),
+            ("CA", How::T("{n} CAD")),
+            ("NZ", How::T("{n} NZD")),
+            ("SG", How::T("{n} SGD")),
+            ("TW", How::T("{n} TWD")),
+            ("BR", How::T("R${n}")),
+        ],
+    ),
+    (
+        "ko",
+        &[
+            ("US", How::T("{n} USD")),
+            ("HK", How::T("{n} HKD")),
+            ("AU", How::T("{n} AUD")),
+            ("CA", How::T("{n} CAD")),
+            ("NZ", How::T("{n} NZD")),
+            ("SG", How::T("{n} SGD")),
+            ("TW", How::T("{n} TWD")),
+            ("BR", How::T("{n} 브라질 헤알")),
+        ],
+    ),
+    (
+        "ar",
+        &[
+            ("US", How::Pair("{P}${n}", "{n} USD")),
+            ("AU", How::Pair("{P}${n}", "{n} AUD")),
+            ("CA", How::Pair("{P}${n}", "{n} CAD")),
+            ("NZ", How::Pair("{P}${n}", "{n} NZD")),
+            ("SG", How::Pair("{P}${n}", "{n} SGD")),
+            ("BR", How::Pair("{P}${n}", "{n} BRL")),
+        ],
+    ),
+    ("ru", &[("CA", How::T("CA${n}")), ("SG", How::T("S${n}"))]),
+    ("bn", &[("HK", How::W), ("AU", How::T("A${n}")), ("NZ", How::W), ("SG", How::W), ("TW", How::W)]),
+    ("ta", &[("AU", How::T("A${n}")), ("SG", How::T("S${n}")), ("TW", How::W)]),
+    ("kn", &[("AU", How::T("A${n}")), ("SG", How::T("S${n}")), ("TW", How::W)]),
+    ("te", &[("AU", How::T("A${n}")), ("SG", How::T("S${n}")), ("TW", How::W)]),
+    ("ur", &[("SG", How::T("S${n}")), ("TW", How::W)]),
+    ("gu", &[("AU", How::T("A${n}")), ("SG", How::T("S${n}"))]),
+    ("mr", &[("AU", How::T("A${n}")), ("SG", How::T("S${n}"))]),
+    ("hi", &[("SG", How::T("S${n}"))]),
+    ("tl", &[("SG", How::T("S${n}"))]),
+    ("ms", &[("SG", How::T("S${n}"))]),
+    ("id", &[("SG", How::T("S${n}"))]),
+];
+const DP_WORDS: &[DpWords] = &[
+    (
+        "en",
+        &["dollars", "dollar"],
+        "",
+        0,
+        &[
+            ("US", &["US dollars", "US dollar"]),
+            ("HK", &["Hong Kong dollars", "Hong Kong dollar"]),
+            ("AU", &["Australian dollars", "Australian dollar"]),
+            ("CA", &["Canadian dollars", "Canadian dollar"]),
+            ("NZ", &["New Zealand dollars", "New Zealand dollar"]),
+            ("SG", &["Singapore dollars", "Singapore dollar"]),
+            ("TW", &["New Taiwan dollars", "New Taiwan dollar"]),
+            ("BR", &["Brazilian reais", "Brazilian real"]),
+        ],
+    ),
+    (
+        "de",
+        &["1:dollar", "dollar"],
+        "",
+        1,
+        &[
+            ("US", &["US-Dollar", "US-Dollar"]),
+            ("HK", &["Hongkong-Dollar", "Hongkong-Dollar"]),
+            ("AU", &["australischer Dollar", "australische Dollar"]),
+            ("CA", &["kanadischer Dollar", "kanadische Dollar"]),
+            ("NZ", &["Neuseeland-Dollar", "Neuseeland-Dollar"]),
+            ("SG", &["Singapur-Dollar", "Singapur-Dollar"]),
+            ("TW", &["Taiwan-Dollar", "Taiwan-Dollar"]),
+            ("BR", &["brasilianischer Real", "brasilianische Real"]),
+        ],
+    ),
+    (
+        "es",
+        &["dólares", "dólar"],
+        "de ",
+        0,
+        &[
+            ("US", &["dólares estadounidenses", "dólar estadounidense"]),
+            ("HK", &["dólares de Hong Kong", "dólar de Hong Kong"]),
+            ("AU", &["dólares australianos", "dólar australiano"]),
+            ("CA", &["dólares canadienses", "dólar canadiense"]),
+            ("NZ", &["dólares neozelandeses", "dólar neozelandés"]),
+            ("SG", &["dólares de Singapur", "dólar de Singapur"]),
+            ("TW", &["dólares taiwaneses", "dólar taiwanés"]),
+            ("BR", &["reales brasileños", "real brasileño"]),
+        ],
+    ),
+    (
+        "it",
+        &["dollari", "dollaro"],
+        "di ",
+        0,
+        &[
+            ("US", &["dollari statunitensi", "dollaro statunitense"]),
+            ("HK", &["dollari di Hong Kong", "dollaro di Hong Kong"]),
+            ("AU", &["dollari australiani", "dollaro australiano"]),
+            ("CA", &["dollari canadesi", "dollaro canadese"]),
+            ("NZ", &["dollari neozelandesi", "dollaro neozelandese"]),
+            ("SG", &["dollari di Singapore", "dollaro di Singapore"]),
+            ("TW", &["dollari taiwanesi", "dollaro taiwanese"]),
+            ("BR", &["real brasiliani", "real brasiliano"]),
+        ],
+    ),
+    ("fr", &["dollars", "dollar"], "de ", 0, &[("BR", &["reais brésiliens", "réal brésilien"])]),
+    (
+        "pt",
+        &["dólares", "dólar"],
+        "de ",
+        0,
+        &[
+            ("HK", &["dólares de Hong Kong", "dólar de Hong Kong"]),
+            ("AU", &["dólares australianos", "dólar australiano"]),
+            ("CA", &["dólares canadenses", "dólar canadense"]),
+            ("NZ", &["dólares neozelandeses", "dólar neozelandês"]),
+            ("SG", &["dólares de Singapura", "dólar de Singapura"]),
+            ("TW", &["dólares taiwaneses", "dólar taiwanês"]),
+        ],
+    ),
+    (
+        "nl",
+        &["dollar"],
+        "",
+        0,
+        &[
+            ("US", &["Amerikaanse dollar"]),
+            ("HK", &["Hongkongse dollar"]),
+            ("AU", &["Australische dollar"]),
+            ("CA", &["Canadese dollar"]),
+            ("NZ", &["Nieuw-Zeelandse dollar"]),
+            ("SG", &["Singaporese dollar"]),
+            ("TW", &["Taiwanese dollar"]),
+            ("BR", &["Braziliaanse real"]),
+        ],
+    ),
+    (
+        "pl",
+        &["dolarów", "dolary", "dolara", "dolar"],
+        "",
+        0,
+        &[
+            ("US", &["dolarów", "dolary", "dolara", "dolar"]),
+            ("HK", &["dolarów hongkońskich", "dolary hongkońskie", "dolara hongkońskiego", "dolar hongkoński"]),
+            ("AU", &["dolarów australijskich", "dolary australijskie", "dolara australijskiego", "dolar australijski"]),
+            ("CA", &["dolarów kanadyjskich", "dolary kanadyjskie", "dolara kanadyjskiego", "dolar kanadyjski"]),
+            (
+                "NZ",
+                &["dolarów nowozelandzkich", "dolary nowozelandzkie", "dolara nowozelandzkiego", "dolar nowozelandzki"],
+            ),
+            ("SG", &["dolarów singapurskich", "dolary singapurskie", "dolara singapurskiego", "dolar singapurski"]),
+            ("TW", &["dolarów tajwańskich", "dolary tajwańskie", "dolara tajwańskiego", "dolar tajwański"]),
+            ("BR", &["reali brazylijskich", "reale brazylijskie", "reala brazylijskiego", "real brazylijski"]),
+        ],
+    ),
+    (
+        "tr",
+        &["dolar"],
+        "",
+        0,
+        &[
+            ("US", &["amerikan doları"]),
+            ("HK", &["Hong Kong doları"]),
+            ("AU", &["avustralya doları"]),
+            ("CA", &["kanada doları"]),
+            ("NZ", &["Yeni Zelanda doları"]),
+            ("SG", &["Singapur doları"]),
+            ("TW", &["Yeni Tayvan doları"]),
+            ("BR", &["brezilya reali"]),
+        ],
+    ),
+    (
+        "uk",
+        &["доларів", "долари", "долара", "долар"],
+        "",
+        0,
+        &[
+            ("US", &["доларів", "долари", "долара", "долар"]),
+            ("HK", &["гонконгських доларів", "гонконгські долари", "гонконгського долара", "гонконгський долар"]),
+            (
+                "AU",
+                &["австралійських доларів", "австралійські долари", "австралійського долара", "австралійський долар"],
+            ),
+            ("CA", &["канадських доларів", "канадські долари", "канадського долара", "канадський долар"]),
+            (
+                "NZ",
+                &[
+                    "новозеландських доларів",
+                    "новозеландські долари",
+                    "новозеландського долара",
+                    "новозеландський долар",
+                ],
+            ),
+            ("SG", &["сінгапурських доларів", "сінгапурські долари", "сінгапурського долара", "сінгапурський долар"]),
+            ("TW", &["тайванських доларів", "тайванські долари", "тайванського долара", "тайванський долар"]),
+            ("BR", &["бразильських реалів", "бразильські реали", "бразильського реала", "бразильський реал"]),
+        ],
+    ),
+    (
+        "cs",
+        &["dolarů", "dolary", "dolaru", "dolar"],
+        "",
+        0,
+        &[
+            ("US", &["dolarů", "dolary", "dolaru", "dolar"]),
+            ("HK", &["hongkongských dolarů", "hongkongské dolary", "hongkongského dolaru", "hongkongský dolar"]),
+            ("AU", &["australských dolarů", "australské dolary", "australského dolaru", "australský dolar"]),
+            ("CA", &["kanadských dolarů", "kanadské dolary", "kanadského dolaru", "kanadský dolar"]),
+            (
+                "NZ",
+                &["novozélandských dolarů", "novozélandské dolary", "novozélandského dolaru", "novozélandský dolar"],
+            ),
+            ("SG", &["singapurských dolarů", "singapurské dolary", "singapurského dolaru", "singapurský dolar"]),
+            ("TW", &["tchajwanských dolarů", "tchajwanské dolary", "tchajwanského dolaru", "tchajwanský dolar"]),
+            ("BR", &["brazilských realů", "brazilské realy", "brazilského realu", "brazilský real"]),
+        ],
+    ),
+    (
+        "sk",
+        &["dolárov", "doláre", "dolára", "dolár"],
+        "",
+        0,
+        &[
+            ("US", &["dolárov", "doláre", "dolára", "dolár"]),
+            ("HK", &["hongkonských dolárov", "hongkonské doláre", "hongkonského dolára", "hongkonský dolár"]),
+            ("AU", &["austrálskych dolárov", "austrálske doláre", "austrálskeho dolára", "austrálsky dolár"]),
+            ("CA", &["kanadských dolárov", "kanadské doláre", "kanadského dolára", "kanadský dolár"]),
+            (
+                "NZ",
+                &["novozélandských dolárov", "novozélandské doláre", "novozélandského dolára", "novozélandský dolár"],
+            ),
+            ("SG", &["singapurských dolárov", "singapurské doláre", "singapurského dolára", "singapurský dolár"]),
+            ("TW", &["taiwanských dolárov", "taiwanské doláre", "taiwanského dolára", "taiwanský dolár"]),
+            ("BR", &["brazílskych realov", "brazílske realy", "brazílskeho realu", "brazílsky real"]),
+        ],
+    ),
+    (
+        "bg",
+        &["долара", "долар"],
+        "",
+        0,
+        &[
+            ("US", &["долара", "долар"]),
+            ("HK", &["хонконгски долара", "хонконгски долар"]),
+            ("AU", &["австралийски долара", "австралийски долар"]),
+            ("CA", &["канадски долара", "канадски долар"]),
+            ("NZ", &["новозеландски долара", "новозеландски долар"]),
+            ("SG", &["сингапурски долара", "сингапурски долар"]),
+            ("TW", &["тайвански долара", "тайвански долар"]),
+            ("BR", &["бразилски реала", "бразилски реал"]),
+        ],
+    ),
+    (
+        "da",
+        &["1:dollar", "dollar"],
+        "",
+        1,
+        &[
+            ("US", &["amerikansk dollar", "amerikanske dollar"]),
+            ("HK", &["hongkongsk dollar", "hongkongske dollar"]),
+            ("AU", &["australsk dollar", "australske dollar"]),
+            ("CA", &["canadisk dollar", "canadiske dollar"]),
+            ("NZ", &["newzealandsk dollar", "newzealandske dollar"]),
+            ("SG", &["singaporeansk dollar", "singaporeanske dollar"]),
+            ("TW", &["taiwansk dollar", "taiwanske dollar"]),
+            ("BR", &["brasiliansk real", "brasilianske real"]),
+        ],
+    ),
+    (
+        "nb",
+        &["1:dollar", "dollar"],
+        "",
+        1,
+        &[
+            ("US", &["dollar", "dollar"]),
+            ("HK", &["hongkongsk dollar", "hongkongske dollar"]),
+            ("AU", &["australsk dollar", "australske dollar"]),
+            ("CA", &["kanadisk dollar", "kanadiske dollar"]),
+            ("NZ", &["newzealandsk dollar", "newzealandske dollar"]),
+            ("SG", &["singaporsk dollar", "singaporske dollar"]),
+            ("TW", &["taiwansk dollar", "taiwanske dollar"]),
+            ("BR", &["brasiliansk real", "brasilianske real"]),
+        ],
+    ),
+    (
+        "fi",
+        &["dollaria", "dollari"],
+        "",
+        0,
+        &[
+            ("US", &["Yhdysvaltain dollaria", "Yhdysvaltain dollari"]),
+            ("HK", &["Hongkongin dollaria", "Hongkongin dollari"]),
+            ("AU", &["Australian dollaria", "Australian dollari"]),
+            ("CA", &["Kanadan dollaria", "Kanadan dollari"]),
+            ("NZ", &["Uuden-Seelannin dollaria", "Uuden-Seelannin dollari"]),
+            ("SG", &["Singaporen dollaria", "Singaporen dollari"]),
+            ("TW", &["Taiwanin dollaria", "Taiwanin dollari"]),
+            ("BR", &["Brasilian realia", "Brasilian real"]),
+        ],
+    ),
+    (
+        "el",
+        &["δολάρια", "δολάριο"],
+        "",
+        0,
+        &[
+            ("US", &["δολάρια", "δολάριο"]),
+            ("HK", &["δολάρια Χονγκ Κονγκ", "δολάριο Χονγκ Κονγκ"]),
+            ("AU", &["δολάρια Αυστραλίας", "δολάριο Αυστραλίας"]),
+            ("CA", &["δολάρια Καναδά", "δολάριο Καναδά"]),
+            ("NZ", &["δολάρια Νέας Ζηλανδίας", "δολάριο Νέας Ζηλανδίας"]),
+            ("SG", &["δολάρια Σιγκαπούρης", "δολάριο Σιγκαπούρης"]),
+            ("TW", &["δολάρια Ταϊβάν", "δολάριο Ταϊβάν"]),
+            ("BR", &["ρεάλ Βραζιλίας", "ρεάλ Βραζιλίας"]),
+        ],
+    ),
+    (
+        "ro",
+        &["dolari", "dolar"],
+        "de ",
+        0,
+        &[
+            ("US", &["dolari", "dolar"]),
+            ("HK", &["dolari din Hong Kong", "dolar din Hong Kong"]),
+            ("AU", &["dolari australieni", "dolar australian"]),
+            ("CA", &["dolari canadieni", "dolar canadian"]),
+            ("NZ", &["dolari neozeelandezi", "dolar neozeelandez"]),
+            ("SG", &["dolari singaporezi", "dolar singaporez"]),
+            ("TW", &["dolari taiwanezi", "dolar taiwanez"]),
+            ("BR", &["reali brazilieni", "real brazilian"]),
+        ],
+    ),
+    (
+        "he",
+        &["דולרים", "דולר"],
+        "",
+        1,
+        &[
+            ("US", &["דולרים", "דולר"]),
+            ("HK", &["דולרים הונג קונגיים", "דולר הונג קונגי"]),
+            ("AU", &["דולרים אוסטרליים", "דולר אוסטרלי"]),
+            ("CA", &["דולרים קנדיים", "דולר קנדי"]),
+            ("NZ", &["דולרים ניו זילנדיים", "דולר ניו זילנדי"]),
+            ("SG", &["דולרים סינגפוריים", "דולר סינגפורי"]),
+            ("TW", &["דולרים טאיוואניים", "דולר טאיוואני"]),
+            ("BR", &["ריאלים ברזילאיים", "ריאל ברזילאי"]),
+        ],
+    ),
+    (
+        "th",
+        &["ดอลลาร์"],
+        "",
+        0,
+        &[
+            ("US", &["ดอลลาร์สหรัฐ"]),
+            ("HK", &["ดอลลาร์ฮ่องกง"]),
+            ("AU", &["ดอลลาร์ออสเตรเลีย"]),
+            ("CA", &["ดอลลาร์แคนาดา"]),
+            ("NZ", &["ดอลลาร์นิวซีแลนด์"]),
+            ("SG", &["ดอลลาร์สิงคโปร์"]),
+            ("TW", &["ดอลลาร์ไต้หวัน"]),
+            ("BR", &["เรียลบราซิล"]),
+        ],
+    ),
+    (
+        "ka",
+        &["დოლარი"],
+        "",
+        0,
+        &[
+            ("US", &["დოლარი"]),
+            ("HK", &["ჰონკონგური დოლარი"]),
+            ("AU", &["ავსტრალიური დოლარი"]),
+            ("CA", &["კანადური დოლარი"]),
+            ("NZ", &["ახალზელანდიური დოლარი"]),
+            ("SG", &["სინგაპურული დოლარი"]),
+            ("TW", &["ტაივანური დოლარი"]),
+            ("BR", &["ბრაზილიური რეალი"]),
+        ],
+    ),
+    (
+        "ml",
+        &["ഡോളർ"],
+        "",
+        0,
+        &[
+            ("US", &["ഡോളർ"]),
+            ("HK", &["ഹോങ്കോങ് ഡോളർ"]),
+            ("AU", &["ഓസ്ട്രേലിയൻ ഡോളർ"]),
+            ("CA", &["കനേഡിയൻ ഡോളർ"]),
+            ("NZ", &["ന്യൂസിലൻഡ് ഡോളർ"]),
+            ("SG", &["സിംഗപ്പൂർ ഡോളർ"]),
+            ("TW", &["തായ്\u{200c}വാൻ ഡോളർ"]),
+            ("BR", &["ബ്രസീലിയൻ റിയാൽ"]),
+        ],
+    ),
+    (
+        "pa",
+        &["ਡਾਲਰ"],
+        "",
+        0,
+        &[
+            ("US", &["ਡਾਲਰ"]),
+            ("HK", &["ਹਾਂਗ ਕਾਂਗ ਡਾਲਰ"]),
+            ("AU", &["ਆਸਟ੍ਰੇਲੀਆਈ ਡਾਲਰ"]),
+            ("CA", &["ਕੇਨੇਡਿਆਈ ਡਾਲਰ"]),
+            ("NZ", &["ਨਿਊਜ਼ੀਲੈਂਡ ਡਾਲਰ"]),
+            ("SG", &["ਸਿੰਗਾਪੁਰ ਡਾਲਰ"]),
+            ("TW", &["ਤਾਈਵਾਨ ਡਾਲਰ"]),
+            ("BR", &["ਬ੍ਰਾਜ਼ੀਲੀਆਈ ਰੀਅਲ"]),
+        ],
+    ),
+    (
+        "or",
+        &["ଡଲାର୍"],
+        "",
+        0,
+        &[
+            ("US", &["ଡଲାର୍"]),
+            ("HK", &["ହଂକଂ ଡଲାର୍"]),
+            ("AU", &["ଅଷ୍ଟ୍ରେଲିୟ ଡଲାର୍"]),
+            ("CA", &["କାନେଡିୟ ଡଲାର୍"]),
+            ("NZ", &["ନ୍ୟୁଜିଲାଣ୍ଡ ଡଲାର୍"]),
+            ("SG", &["ସିଙ୍ଗାପୁର ଡଲାର୍"]),
+            ("TW", &["ତାଇୱାନ ଡଲାର୍"]),
+            ("BR", &["ବ୍ରାଜିଲିୟ ରିଆଲ୍"]),
+        ],
+    ),
+    (
+        "bn",
+        &["ডলার"],
+        "",
+        0,
+        &[
+            ("US", &["মার্কিন ডলার"]),
+            ("HK", &["হংকং ডলার"]),
+            ("AU", &["অস্ট্রেলীয় ডলার"]),
+            ("CA", &["কানাডিয়ান ডলার"]),
+            ("NZ", &["নিউজিল্যান্ড ডলার"]),
+            ("SG", &["সিঙ্গাপুর ডলার"]),
+            ("TW", &["তাইওয়ান ডলার"]),
+            ("BR", &["ব্রাজিলিয়ান রিয়েল"]),
+        ],
+    ),
+    (
+        "ta",
+        &["டாலர்கள்", "டாலர்"],
+        "",
+        0,
+        &[
+            ("US", &["டாலர்கள்", "டாலர்"]),
+            ("HK", &["ஹாங்காங் டாலர்கள்", "ஹாங்காங் டாலர்"]),
+            ("AU", &["ஆஸ்திரேலிய டாலர்கள்", "ஆஸ்திரேலிய டாலர்"]),
+            ("CA", &["கனடியன் டாலர்கள்", "கனடியன் டாலர்"]),
+            ("NZ", &["நியூசிலாந்து டாலர்கள்", "நியூசிலாந்து டாலர்"]),
+            ("SG", &["சிங்கப்பூர் டாலர்கள்", "சிங்கப்பூர் டாலர்"]),
+            ("TW", &["தைவான் டாலர்கள்", "தைவான் டாலர்"]),
+            ("BR", &["பிரேசிலியன் ரியால்", "பிரேசிலியன் ரியால்"]),
+        ],
+    ),
+    (
+        "kn",
+        &["ಡಾಲರ್"],
+        "",
+        0,
+        &[
+            ("US", &["ಯುಎಸ್ ಡಾಲರ್"]),
+            ("HK", &["ಹಾಂಗ್ ಕಾಂಗ್ ಡಾಲರ್"]),
+            ("AU", &["ಆಸ್ಟ್ರೇಲಿಯನ್ ಡಾಲರ್"]),
+            ("CA", &["ಕೆನಡಿಯನ್ ಡಾಲರ್"]),
+            ("NZ", &["ನ್ಯೂಜಿಲೆಂಡ್ ಡಾಲರ್"]),
+            ("SG", &["ಸಿಂಗಾಪುರ್ ಡಾಲರ್"]),
+            ("TW", &["ತೈವಾನ್ ಡಾಲರ್"]),
+            ("BR", &["ಬ್ರೆಜಿಲಿಯನ್ ರಿಯಲ್"]),
+        ],
+    ),
+    (
+        "te",
+        &["డాలర్లు", "డాలర్"],
+        "",
+        0,
+        &[
+            ("US", &["అమెరికన్ డాలర్లు", "అమెరికన్ డాలర్"]),
+            ("HK", &["హాంకాంగ్ డాలర్లు", "హాంకాంగ్ డాలర్"]),
+            ("AU", &["ఆస్ట్రేలియన్ డాలర్లు", "ఆస్ట్రేలియన్ డాలర్"]),
+            ("CA", &["కెనడియన్ డాలర్లు", "కెనడియన్ డాలర్"]),
+            ("NZ", &["న్యూజిలాండ్ డాలర్లు", "న్యూజిలాండ్ డాలర్"]),
+            ("SG", &["సింగపూర్ డాలర్లు", "సింగపూర్ డాలర్"]),
+            ("TW", &["తైవాన్ డాలర్లు", "తైవాన్ డాలర్"]),
+            ("BR", &["బ్రెజిలియన్ రియల్\u{200c}లు", "బ్రెజిలియన్ రియల్"]),
+        ],
+    ),
+    (
+        "hu",
+        &["dollár"],
+        "",
+        0,
+        &[
+            ("US", &["amerikai dollár"]),
+            ("HK", &["hongkongi dollár"]),
+            ("AU", &["ausztrál dollár"]),
+            ("CA", &["kanadai dollár"]),
+            ("NZ", &["új-zélandi dollár"]),
+            ("SG", &["szingapúri dollár"]),
+            ("TW", &["tajvani dollár"]),
+            ("BR", &["brazil real"]),
+        ],
+    ),
+    (
+        "hi",
+        &["डॉलर"],
+        "",
+        0,
+        &[
+            ("US", &["अमेरिकी डॉलर"]),
+            ("HK", &["हांगकांग डॉलर"]),
+            ("AU", &["ऑस्ट्रेलियाई डॉलर"]),
+            ("CA", &["कनाडाई डॉलर"]),
+            ("NZ", &["न्यूज़ीलैंड डॉलर"]),
+            ("SG", &["सिंगापुर डॉलर"]),
+            ("TW", &["नया ताइवान डॉलर"]),
+            ("BR", &["ब्राज़ीलियाई रियाल"]),
+        ],
+    ),
+    (
+        "gu",
+        &["ડૉલર"],
+        "",
+        0,
+        &[
+            ("US", &["યુએસ ડૉલર"]),
+            ("HK", &["હોંગકોંગ ડૉલર"]),
+            ("AU", &["ઑસ્ટ્રેલિયન ડૉલર"]),
+            ("CA", &["કેનેડિયન ડૉલર"]),
+            ("NZ", &["ન્યૂઝીલેન્ડ ડૉલર"]),
+            ("SG", &["સિંગાપોર ડૉલર"]),
+            ("TW", &["નવીન તાઇવાન ડૉલર"]),
+            ("BR", &["બ્રાઝિલિયન રિયાલ"]),
+        ],
+    ),
+    (
+        "mr",
+        &["डॉलर"],
+        "",
+        0,
+        &[
+            ("US", &["यूएस डॉलर"]),
+            ("HK", &["हाँगकाँग डॉलर"]),
+            ("AU", &["ऑस्ट्रेलियन डॉलर"]),
+            ("CA", &["कॅनडियन डॉलर"]),
+            ("NZ", &["न्यूझीलंड डॉलर"]),
+            ("SG", &["सिंगापूर डॉलर"]),
+            ("TW", &["नवीन तैवान डॉलर"]),
+            ("BR", &["ब्राझिलियन रियाल"]),
+        ],
+    ),
+    (
+        "tl",
+        &["dolyar"],
+        "",
+        0,
+        &[
+            ("US", &["dolyar ng US"]),
+            ("HK", &["dolyar ng Hong Kong"]),
+            ("AU", &["dolyar ng Australia"]),
+            ("CA", &["dolyar ng Canada"]),
+            ("NZ", &["dolyar ng New Zealand"]),
+            ("SG", &["dolyar ng Singapore"]),
+            ("TW", &["bagong dolyar ng Taiwan"]),
+            ("BR", &["real ng Brazil"]),
+        ],
+    ),
+    (
+        "ar",
+        &["دولار"],
+        "",
+        0,
+        &[
+            ("US", &["دولار أمريكي"]),
+            ("HK", &["دولار هونج كونج"]),
+            ("AU", &["دولار أسترالي"]),
+            ("CA", &["دولار كندي"]),
+            ("NZ", &["دولار نيوزيلندي"]),
+            ("SG", &["دولار سنغافوري"]),
+            ("TW", &["دولار تايواني"]),
+            ("BR", &["ريال برازيلي"]),
+        ],
+    ),
+    (
+        "ur",
+        &["ڈالر"],
+        "",
+        0,
+        &[
+            ("US", &["امریکی ڈالر"]),
+            ("HK", &["ہانگ کانگ ڈالر"]),
+            ("AU", &["آسٹریلوی ڈالر"]),
+            ("CA", &["کینیڈین ڈالر"]),
+            ("NZ", &["نیوزی لینڈ ڈالر"]),
+            ("SG", &["سنگاپور ڈالر"]),
+            ("TW", &["تائیوان ڈالر"]),
+            ("BR", &["برازیلی ریئل"]),
+        ],
+    ),
+    (
+        "ms",
+        &["dolar"],
+        "",
+        0,
+        &[
+            ("US", &["dolar Amerika"]),
+            ("HK", &["dolar Hong Kong"]),
+            ("AU", &["dolar Australia"]),
+            ("CA", &["dolar Kanada"]),
+            ("NZ", &["dolar New Zealand"]),
+            ("SG", &["dolar Singapura"]),
+            ("TW", &["dolar Baru Taiwan"]),
+            ("BR", &["real Brazil"]),
+        ],
+    ),
+    (
+        "id",
+        &["dolar"],
+        "",
+        0,
+        &[
+            ("US", &["dolar Amerika"]),
+            ("HK", &["dolar Hong Kong"]),
+            ("AU", &["dolar Australia"]),
+            ("CA", &["dolar Kanada"]),
+            ("NZ", &["dolar Selandia Baru"]),
+            ("SG", &["dolar Singapura"]),
+            ("TW", &["dolar Baru Taiwan"]),
+            ("BR", &["real Brasil"]),
+        ],
+    ),
+    (
+        "vi",
+        &["đô la"],
+        "",
+        0,
+        &[
+            ("US", &["đô la mỹ"]),
+            ("HK", &["đô la hồng kông"]),
+            ("AU", &["đô la úc"]),
+            ("CA", &["đô la canada"]),
+            ("NZ", &["đô la new zealand"]),
+            ("SG", &["đô la singapore"]),
+            ("TW", &["đô la đài loan"]),
+            ("BR", &["real brazil"]),
+        ],
+    ),
+    (
+        "sv",
+        &["dollar"],
+        "",
+        0,
+        &[
+            ("US", &["amerikanska dollar"]),
+            ("HK", &["hongkongdollar"]),
+            ("AU", &["australiska dollar"]),
+            ("CA", &["kanadensiska dollar"]),
+            ("NZ", &["nyzeeländska dollar"]),
+            ("SG", &["singaporianska dollar"]),
+            ("TW", &["taiwanesiska dollar"]),
+            ("BR", &["realer"]),
+        ],
+    ),
+];
+const DP_OF: &[(&str, &[&str])] = &[
+    ("es", &["mil millones", "millones", "millón", "billones", "billón"]),
+    ("it", &["milioni", "milione", "miliardi", "miliardo", "bilioni", "bilione", "mln", "mld"]),
+    ("pt", &["milhões", "milhão", "bilhões", "bilhão", "trilhões", "trilhão", "mi", "bi", "tri"]),
+    ("ro", &["milioane", "milion", "miliarde", "miliard", "trilioane", "trilion", "mil.", "mld."]),
+    ("fr", &["millions", "million", "milliards", "milliard", "billions", "billion"]),
+];
+const DP_SCALE_SAID: &[&str] = &["en"];
+const DP_JOIN: &[(&str, &[&str])] =
+    &[("de", &["million", "millionen", "milliarde", "milliarden", "billion", "billionen", "cent"])];
+const DP_FIX: &[(&str, &[(&str, &str)])] = &[("hu", &[("kettő", "két")])];
+const DP_CENTS: &[DpCents] = &[
+    ("en", &["cents", "cent"], &[("dollars", "cents"), ("dollar", "cent"), ("reais", "centavos"), ("real", "centavo")]),
+    ("de", &["", "Cent"], &[("Dollar", "Cent"), ("Real", "Centavos")]),
+    (
+        "es",
+        &["centavos", "centavo"],
+        &[("dólares", "centavos"), ("dólar", "centavo"), ("reales", "centavos"), ("real", "centavo")],
+    ),
+    (
+        "it",
+        &["centesimi", "centesimo"],
+        &[
+            ("dollari", "centesimi"),
+            ("dollaro", "centesimo"),
+            ("real brasiliani", "centavos brasiliani"),
+            ("real brasiliano", "centavo brasiliano"),
+        ],
+    ),
+    ("pt", &["centavos", "centavo"], &[("dólares", "centavos"), ("dólar", "centavo")]),
+    ("nl", &["cent"], &[("dollar", "cent"), ("real", "centavo")]),
+    (
+        "pl",
+        &["centów", "centy", "centa", "cent"],
+        &[("dolarów", "centów"), ("dolary", "centy"), ("dolara", "centa"), ("dolar", "cent")],
+    ),
+    ("tr", &["sent"], &[("doları", "senti"), ("dolar", "sent")]),
+    (
+        "cs",
+        &["centů", "centy", "centu", "cent"],
+        &[("dolarů", "centů"), ("dolary", "centy"), ("dolaru", "centu"), ("dolar", "cent")],
+    ),
+    (
+        "sk",
+        &["centov", "centy", "centa", "cent"],
+        &[("dolárov", "centov"), ("doláre", "centy"), ("dolára", "centa"), ("dolár", "cent")],
+    ),
+    ("bg", &["цента", "цент"], &[("долара", "цента"), ("долар", "цент"), ("реала", "сентаво"), ("реал", "сентаво")]),
+    ("da", &["", "cent"], &[("dollar", "cent")]),
+    ("nb", &["", "cent"], &[("dollar", "cent"), ("real", "centavos")]),
+    ("fi", &["senttiä", "sentti"], &[("dollaria", "senttiä"), ("dollari", "sentti")]),
+    ("el", &["σεντ", "σεντ"], &[("δολάρια", "σεντ"), ("δολάριο", "σεντ"), ("ρεάλ", "σεντάβος")]),
+    ("ro", &["cenți", "cent"], &[("dolari", "cenți"), ("dolar", "cent"), ("reali", "centavos"), ("real", "centavo")]),
+    ("he", &["סנטים", "סנט"], &[("דולרים", "סנטים"), ("דולר", "סנט"), ("ריאלים", "סנטאבו"), ("ריאל", "סנטאבו")]),
+    ("ka", &["ცენტი"], &[("დოლარი", "ცენტი")]),
+    ("ml", &["സെന്റ്"], &[("ഡോളർ", "സെന്റ്"), ("റിയാൽ", "സെന്റാവോ")]),
+    ("pa", &["ਸੈਂਟ"], &[("ਡਾਲਰ", "ਸੈਂਟ"), ("ਰੀਅਲ", "ਸੈਂਟਾਵੋ")]),
+    ("or", &["ସେଣ୍ଟ"], &[("ଡଲାର୍", "ସେଣ୍ଟ")]),
+    ("bn", &["সেন্ট"], &[("ডলার", "সেন্ট")]),
+    ("ta", &["சென்ட்கள்", "சென்ட்"], &[("டாலர்கள்", "சென்ட்கள்"), ("டாலர்", "சென்ட்")]),
+    ("kn", &["ಸೆಂಟ್"], &[("ಡಾಲರ್", "ಸೆಂಟ್")]),
+    ("te", &["సెంట్లు", "సెంట్"], &[("డాలర్లు", "సెంట్లు"), ("డాలర్", "సెంట్")]),
+    ("hu", &["cent"], &[("dollár", "cent")]),
+    ("hi", &["सेंट"], &[("डॉलर", "सेंट")]),
+    ("gu", &["સેન્ટ"], &[("ડૉલર", "સેન્ટ")]),
+    ("mr", &["सेंट"], &[("डॉलर", "सेंट")]),
+    ("tl", &["sentimo"], &[("dolyar", "sentimo")]),
+    ("ar", &["سنت"], &[("دولار", "سنت")]),
+    ("ur", &["سینٹ"], &[("ڈالر", "سینٹ")]),
+    ("ms", &["sen"], &[("dolar", "sen")]),
+    ("id", &["sen"], &[("dolar", "sen")]),
+    ("vi", &["xu"], &[("đô la", "xu")]),
+    ("sv", &["cent"], &[("dollar", "cent")]),
+];
+const DP_MINUS: &[(&str, &str)] = &[
+    ("en", "minus"),
+    ("de", "minus"),
+    ("es", "menos"),
+    ("fr", "moins"),
+    ("it", "meno"),
+    ("pt", "menos"),
+    ("ja", "マイナス"),
+    ("zh", "负"),
+    ("ko", "마이너스"),
+    ("nl", "min"),
+    ("pl", "minus"),
+    ("tr", "eksi"),
+    ("uk", "мінус"),
+    ("cs", "minus"),
+    ("da", "minus"),
+    ("fi", "miinus"),
+    ("el", "μείον"),
+    ("nb", "minus"),
+    ("ro", "minus"),
+    ("sk", "mínus"),
+    ("bg", "минус"),
+    ("he", "מינוס"),
+    ("th", "ลบ"),
+    ("tl", "minus"),
+    ("ms", "negatif"),
+    ("ka", "მინუს"),
+    ("ta", "மைனஸ்"),
+    ("gu", "માઇનસ"),
+    ("kn", "ಮೈನಸ್"),
+    ("ml", "മൈനസ്"),
+    ("pa", "ਮਾਈਨਸ"),
+    ("or", "ମାଇନସ"),
+    ("ru", "минус"),
+    ("sv", "minus"),
+    ("hu", "mínusz"),
+    ("ar", "سالب"),
+    ("vi", "âm"),
+    ("id", "negatif"),
+    ("hi", "माइनस"),
+    ("bn", "মাইনাস"),
+    ("te", "మైనస్"),
+    ("mr", "उणे"),
+    ("ur", "منفی"),
+];
+const DP_BUILD: &[DpBuild] = &[(
+    "fr",
+    &[
+        ("HK", ["dollar de Hong Kong", "dollars de Hong Kong", "cents de Hong Kong"]),
+        ("AU", ["dollar australien", "dollars australiens", "cents australiens"]),
+        ("CA", ["dollar canadien", "dollars canadiens", "cents canadiens"]),
+        ("NZ", ["dollar néo-zélandais", "dollars néo-zélandais", "cents néo-zélandais"]),
+        ("SG", ["dollar de Singapour", "dollars de Singapour", "cents de Singapour"]),
+        ("TW", ["dollar taïwanais", "dollars taïwanais", "cents taïwanais"]),
+        ("BR", ["réal brésilien", "reais brésiliens", "centavos"]),
+    ],
+)];
+const DP_RANGE_B: &[&str] = &["cs", "sk"];
+const DP_RANGE_SAY: &[(&str, &str, &str, bool)] = &[("bg", "от ", " до ", true), ("ta", "", " முதல் ", false)];
+const DP_MINUS_KEPT: &[&str] = &["hi", "gu", "bn"];
+const DP_RANGE_GRAMMAR: &[&str] = &["ka", "he"];
+const DP_RANGE_SIGN: &[&str] = &["es", "it", "pt", "ro", "el", "ml"];
+const DP_RANGE_FORM: &[(&str, &[(&str, &str)])] = &[
+    ("zh", &[("BR", "{a}-{b}巴西雷亚尔")]),
+    ("ko", &[("BR", "{a}~{b} 브라질 헤알")]),
+    ("it", &[("BR", "da {a} a {b} real brasiliani")]),
+];
+const DP_STOP: &[&str] = &[
+    "the",
+    "in",
+    "of",
+    "to",
+    "from",
+    "across",
+    "throughout",
+    "within",
+    "for",
+    "at",
+    "by",
+    "into",
+    "outside",
+    "inside",
+    "around",
+    "over",
+    "all",
+];
+
+/// A dollar-prefix amount's spoken form: the words (DP_WORDS), a written form ({n}: the amount without its thousands
+/// separators, with its scale word; {P}: the prefix as typed), or a pair (the form for one, the form for other amounts).
+#[derive(Clone, Copy)]
+enum How {
+    W,
+    T(&'static str),
+    Pair(&'static str, &'static str),
+}
+
+/// (language, the grammar's dollar words, the word before the currency after a scale noun, the form after a scale
+/// word, per currency the replacement of each dollar word)
+type DpWords =
+    (&'static str, &'static [&'static str], &'static str, usize, &'static [(&'static str, &'static [&'static str])]);
+
+/// (language, the grammar's cents word for each dollar word, the dollar words turned into cents words)
+type DpCents = (&'static str, &'static [&'static str], &'static [(&'static str, &'static str)]);
+/// (language, per currency the words for one, for more and for its cents)
+type DpBuild = (&'static str, &'static [(&'static str, [&'static str; 3])]);
+
+fn dp_table<T: Copy>(table: &[(&str, T)], lang: &str) -> Option<T> {
+    table.iter().find(|(l, _)| *l == lang).map(|x| x.1)
+}
+
+fn dp_words_of(lang: &str) -> Option<&'static DpWords> {
+    DP_WORDS.iter().find(|w| w.0 == lang)
+}
+
+/// No digit and no dollar sign: the grammar read the amount.
+fn dp_read(s: &str) -> bool {
+    !s.chars().any(|ch| ch.is_ascii_digit() || ch == '$')
+}
+
+/// The integer digits and the decimals of an amount as the language writes it: prototype `dp_amount`.
+fn dp_amount(s: &str, lang: &str) -> Option<(String, String)> {
+    let (dec, grp) = if DP_COMMA.contains(&lang) { (',', '.') } else { ('.', ',') };
+    let mut nums: Vec<String> = vec![String::new()];
+    let mut seps: Vec<char> = Vec::new();
+    for ch in s.chars() {
+        if matches!(ch, '.' | ',' | '\u{a0}' | '\u{202f}' | ' ') {
+            seps.push(ch);
+            nums.push(String::new());
+        } else {
+            nums.last_mut().expect("a group").push(ch);
+        }
+    }
+    let mut frac = String::new();
+    if let Some(&last) = seps.last()
+        && (last == dec
+            || (last == grp
+                && nums.last().expect("a group").len() <= 2
+                && seps.iter().filter(|&&x| x == grp).count() == 1))
+    {
+        frac = nums.pop().expect("a group");
+        seps.pop();
+    }
+    if !seps.is_empty()
+        && (seps.iter().any(|&x| x != seps[0])
+            || seps[0] == dec
+            || nums[0].len() > 3
+            || nums[1..].iter().any(|x| x.len() != 3))
+    {
+        return None;
+    }
+    Some((nums.concat(), frac))
+}
+
+/// Python's `str.capitalize` for a lower-case word.
+fn dp_capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect())
+}
+
+/// The DP_FIX replacements of the language.
+fn dp_fix(lang: &str, mut said: String) -> String {
+    for (a, b) in dp_table(DP_FIX, lang).unwrap_or(&[]) {
+        said = said.replace(a, b);
+    }
+    said
+}
+
+/// The spoken words of a prefixed amount, or the written form for the language's rules: prototype `dp_words`.
+fn dp_words(lang: &str, cur: &str, whole: &str, frac: &str, scale: &str, written: &str, unit: &str) -> Option<String> {
+    let &(_, forms, of, of_form, table) = dp_words_of(lang)?;
+    let repl = dp_table(table, cur)?;
+    let glued = GLUED.contains(&lang);
+    let sp = if glued { "" } else { " " };
+    if !scale.is_empty() && !DP_SCALE_SAID.contains(&lang) {
+        let word = scale.trim_matches(|c| c == ' ' || c == '\u{a0}');
+        let of = if dp_table(DP_OF, lang).is_some_and(|w| w.contains(&word)) { of } else { "" };
+        return Some(format!("{written}{scale}{sp}{of}{}{unit}", repl[of_form]));
+    }
+    let mut frac = frac.to_string();
+    if scale.is_empty() && frac.len() == 1 {
+        frac.push('0'); // $2,5 is two dollars fifty
+    }
+    if scale.is_empty() && frac.trim_matches('0').is_empty() {
+        frac.clear(); // 5,00 is five
+    }
+    let num = if frac.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{whole}{}{frac}", if DP_COMMA.contains(&lang) { "," } else { "." })
+    };
+    let mut base = words(&format!("${num}{scale}"), lang);
+    if !dp_read(&base) {
+        return None;
+    }
+    let mut unit = unit;
+    if !unit.is_empty() {
+        let per = words(&format!("${num}{unit}"), lang);
+        if per.starts_with(&format!("{base} ")) && dp_read(&per) && !per.contains('/') {
+            base = per; // the grammar reads the unit after a plain dollar amount
+            unit = "";
+        }
+    }
+    let mut toks: Vec<String> = if glued { Vec::new() } else { base.split(' ').map(str::to_string).collect() };
+    if let Some(nouns) = dp_table(DP_JOIN, lang) {
+        let mut out: Vec<String> = Vec::new();
+        let mut joining = false;
+        for tok in toks {
+            if nouns.contains(&tok.as_str()) || forms.contains(&tok.as_str()) {
+                out.push(if nouns.contains(&tok.as_str()) { dp_capitalize(&tok) } else { tok });
+                joining = false;
+            } else if joining {
+                out.last_mut().expect("a token").push_str(&tok);
+            } else {
+                out.push(tok);
+                joining = true;
+            }
+        }
+        toks = out;
+    }
+    let one = whole == "1" && scale.is_empty();
+    let active: Vec<(usize, &str)> = forms
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match f.strip_prefix("1:") {
+            Some(rest) => one.then_some((i, rest)),
+            None => Some((i, *f)),
+        })
+        .collect();
+    let mut hit: Option<(usize, usize, &str)> = None;
+    if glued {
+        for &(i, f) in &active {
+            let k = if scale.is_empty() { base.find(f) } else { base.rfind(f) };
+            if let Some(k) = k {
+                hit = Some((k, i, f));
+                break;
+            }
+        }
+    } else {
+        let order: Vec<usize> =
+            if scale.is_empty() { (0..toks.len()).collect() } else { (0..toks.len()).rev().collect() };
+        for k in order {
+            hit = active.iter().find(|(_, f)| toks[k] == *f).map(|&(i, f)| (k, i, f));
+            if hit.is_some() {
+                break;
+            }
+        }
+    }
+    if hit.is_none()
+        && scale.is_empty()
+        && !glued
+        && let Some(&(_, cents, pairs)) = DP_CENTS.iter().find(|x| x.0 == lang)
+    {
+        // cents only (HK$0.50 → fifty Hong Kong cents): the cents word becomes the currency's cents
+        let (k, ci) = toks
+            .iter()
+            .enumerate()
+            .find_map(|(k, tok)| cents.iter().position(|c| !tok.is_empty() && c == tok).map(|ci| (k, ci)))?;
+        let own = repl[ci];
+        let (a, b) = pairs.iter().find(|(a, _)| own.contains(a))?;
+        toks[k] = own.replacen(a, b, 1);
+        return Some(dp_fix(lang, toks.join(" ")) + unit);
+    }
+    let rest = |&(k, _, f): &(usize, usize, &str)| if glued { k + f.len() < base.len() } else { k + 1 < toks.len() };
+    let Some((k, i, f)) = hit.filter(|h| scale.is_empty() || !rest(h)) else {
+        return (!scale.is_empty()).then(|| format!("{written}{scale}{sp}{of}{}{unit}", repl[of_form]));
+    };
+    if glued {
+        return Some(format!("{}{}{}{unit}", &base[..k], repl[i], &base[k + f.len()..]));
+    }
+    if !of.is_empty() && k > 0 && dp_table(DP_OF, lang).is_some_and(|w| w.contains(&toks[k - 1].as_str())) {
+        let prev = format!("{} {}", toks[k - 1], of.trim()); // es “dos millones de dólares”
+        toks[k - 1] = prev;
+    }
+    toks[k] = repl[i].to_string();
+    Some(dp_fix(lang, toks.join(" ")) + unit)
+}
+
+/// The amount as the rule writes it for the grammar: prototype `dp_flat`.
+fn dp_flat(n: &str, whole: &str, frac: &str, scale: &str) -> String {
+    if frac.trim_matches('0').is_empty() {
+        return whole.to_string();
+    }
+    let at = n.len() - frac.len();
+    let pad = if frac.len() == 1 && scale.is_empty() { "0" } else { "" };
+    format!("{whole}{}{frac}{pad}", &n[at - 1..at])
+}
+
+/// Whether amount a (integer digits, decimals) is smaller than amount b: prototype `dp_less`.
+fn dp_less(a: &(String, String), b: &(String, String)) -> bool {
+    let key = |x: &(String, String)| {
+        let whole = x.0.trim_start_matches('0').to_string();
+        let mut frac = x.1.clone();
+        while frac.chars().count() < 9 {
+            frac.push('0');
+        }
+        (whole.chars().count(), whole, frac)
+    };
+    key(a) < key(b)
+}
+
+fn dp_has_words(lang: &str, cur: &str) -> bool {
+    dp_words_of(lang).is_some_and(|w| dp_table(w.4, cur).is_some())
+}
+
+/// An amount with cents in the fr money style (DP_BUILD): prototype `dp_build`.
+fn dp_build(lang: &str, cur: &str, whole: &str, frac: &str) -> Option<String> {
+    let [one, many, cents] = dp_table(dp_table(DP_BUILD, lang)?, cur)?;
+    let two: String = format!("{frac}0").chars().take(2).collect();
+    let c = two.trim_start_matches('0');
+    let said = words(if c.is_empty() { "0" } else { c }, lang);
+    let w = whole.trim_start_matches('0');
+    if w.is_empty() {
+        return Some(format!("{said} {cents}"));
+    }
+    Some(format!("{} {} {said}", words(whole, lang), if w == "1" { one } else { many }))
+}
+
+/// A range of a prefixed currency for the language's range rule: prototype `dp_range_words`.
+fn dp_range_words(lang: &str, cur: &str, fa: &str, fb: &str, pb: &(String, String), scale: &str) -> Option<String> {
+    let &(_, forms, of, of_form, table) = dp_words_of(lang)?;
+    let repl = dp_table(table, cur)?;
+    let word = scale.trim_matches(|c| c == ' ' || c == '\u{a0}');
+    let of = if dp_table(DP_OF, lang).is_some_and(|w| w.contains(&word)) { of } else { "" };
+    if scale.is_empty()
+        && let Some(&(_, fro, to, money)) = DP_RANGE_SAY.iter().find(|x| x.0 == lang)
+    {
+        let first = if money { words(&format!("${fa}"), lang) } else { words(fa, lang) };
+        if let Some(said) = dp_words(lang, cur, &pb.0, &pb.1, "", fb, "")
+            && !said.is_empty()
+            && dp_read(&first)
+        {
+            let nums = first.split(' ').filter(|x| !forms.contains(x)).collect::<Vec<_>>().join(" ");
+            return Some(format!("{fro}{nums}{to}{said}"));
+        }
+    }
+    if scale.is_empty() && DP_RANGE_GRAMMAR.contains(&lang) {
+        let base = words(&format!("${fa}-{fb}"), lang);
+        let toks: Vec<&str> = base.split(' ').collect();
+        if let Some(i) = forms.iter().position(|f| toks.last() == Some(f))
+            && dp_read(&base)
+        {
+            let mut out = toks[..toks.len() - 1].to_vec();
+            out.push(repl[i]);
+            return Some(out.join(" "));
+        }
+    }
+    let mut k = of_form;
+    if scale.is_empty() && DP_RANGE_B.contains(&lang) {
+        let said = words(&format!("${}", pb.0), lang);
+        let toks: Vec<&str> = said.split(' ').collect();
+        k = forms.iter().position(|f| toks.contains(f)).unwrap_or(of_form);
+    }
+    if scale.is_empty() && DP_RANGE_SIGN.contains(&lang) {
+        if repl[of_form] == forms[of_form] {
+            return Some(format!("{fa}-{fb} $"));
+        }
+        if let Some(q) = repl[of_form].strip_prefix(&format!("{} ", forms[of_form])) {
+            return Some(format!("{fa}-{fb} $ {q}"));
+        }
+    }
+    Some(format!("{fa}-{fb}{scale} {of}{}", repl[k]))
+}
+
+/// Cents only: no whole part, some cents.
+fn dp_cents_only(whole: &str, frac: &str) -> bool {
+    whole.trim_matches('0').is_empty() && !frac.trim_matches('0').is_empty()
+}
+
+/// The grammar reads the prefix as typed: prototype `all_dollar_prefix.kept`.
+fn dp_kept(lang: &str, forms: &[(&str, How)], cur: &str, whole: &str, frac: &str, sc: &str) -> bool {
+    let build = dp_table(DP_BUILD, lang).is_some_and(|b| dp_table(b, cur).is_some())
+        && !frac.trim_matches('0').is_empty()
+        && sc.is_empty();
+    dp_table(forms, cur).is_none()
+        && !(dp_has_words(lang, cur) && (!sc.is_empty() || dp_cents_only(whole, frac)))
+        && !build
+}
+
+/// The rewrite of one prefixed amount: prototype `all_dollar_prefix.positive`.
+fn dp_positive(lang: &str, forms: &[(&str, How)], p: &str, n: &str, sc: &str, u: &str) -> Option<String> {
+    let cur = dp_table(DP_PREFIX, p)?;
+    let how = dp_table(forms, cur);
+    let (whole, frac) = dp_amount(n, lang)?;
+    let hw = dp_has_words(lang, cur);
+    if matches!(how, Some(How::W))
+        || (how.is_none() && hw && (!sc.is_empty() || dp_cents_only(&whole, &frac)))
+        || (!sc.is_empty() && hw)
+    {
+        let said = dp_words(lang, cur, &whole, &frac, sc, n, u);
+        if said.is_none() && cur == "US" {
+            return Some(format!("${n}{sc}{u}")); // the grammar's dollar is the US dollar
+        }
+        return said;
+    }
+    if !frac.trim_matches('0').is_empty()
+        && sc.is_empty()
+        && let Some(b) = dp_build(lang, cur, &whole, &frac)
+    {
+        return Some(b + u);
+    }
+    let flat = dp_flat(n, &whole, &frac, sc);
+    let template = match how {
+        None => return Some(format!("{p}${flat}{sc}{u}")),
+        Some(How::T(s)) => s,
+        Some(How::Pair(one, many)) => {
+            if whole == "1" && sc.is_empty() {
+                one
+            } else {
+                many
+            }
+        }
+        Some(How::W) => unreachable!("handled above"),
+    };
+    Some(template.replace("{P}", p).replace("{n}", &format!("{flat}{sc}")) + u)
+}
+
+/// One prefixed amount in the text: prototype `all_dollar_prefix.f`.
+#[allow(clippy::too_many_arguments)]
+fn dp_rewrite(
+    lang: &str,
+    forms: &[(&str, How)],
+    whole_match: &str,
+    p: &str,
+    n: &str,
+    sc: &str,
+    u: &str,
+    first: bool,
+) -> Option<String> {
+    let cur = dp_table(DP_PREFIX, p)?;
+    let (whole, frac) = dp_amount(n, lang)?;
+    if dp_kept(lang, forms, cur, &whole, &frac, sc) {
+        let flat = dp_flat(n, &whole, &frac, sc);
+        return (flat != n).then(|| whole_match.replacen(n, &flat, 1)); // HK$1 500 → HK$1500, in place
+    }
+    let new = dp_positive(lang, forms, p, n, sc, u)?;
+    if first && new == format!("{p}${n}{sc}{u}") && !GLUED.contains(&lang) {
+        return None; // as typed, give or take the space after the sign (US$ 5)
+    }
+    Some(new)
+}
+
+/// A negative amount: prototype `all_dollar_prefix.neg`.
+fn dp_negative(lang: &str, forms: &[(&str, How)], p: &str, n: &str, sc: &str, u: &str, plain: bool) -> Option<String> {
+    let cur = dp_table(DP_PREFIX, p)?;
+    let (whole, frac) = dp_amount(n, lang)?;
+    if dp_kept(lang, forms, cur, &whole, &frac, sc) {
+        let flat = dp_flat(n, &whole, &frac, sc);
+        if DP_MINUS_KEPT.contains(&lang) {
+            return Some(format!("{} {p}${flat}{sc}{u}", dp_table(DP_MINUS, lang).unwrap_or("-")));
+        }
+        return if plain && flat == n { None } else { Some(format!("-{p}${flat}{sc}{u}")) };
+    }
+    let new = dp_positive(lang, forms, p, n, sc, u)?;
+    if new.starts_with(|ch: char| ch.is_ascii_digit()) {
+        return Some(format!("-{new}")); // 5 HKD → -5 HKD, which the language's rules read
+    }
+    let sp = if GLUED.contains(&lang) { "" } else { " " };
+    Some(format!("{}{sp}{new}", dp_table(DP_MINUS, lang).unwrap_or("-")))
+}
+
+/// A range: prototype `all_dollar_prefix.rng` (a hyphen with spaces around it only when the second amount is the
+/// larger: HK$10 - HK$3 is a subtraction).
+fn dp_range(lang: &str, forms: &[(&str, How)], p: &str, a: &str, s: &str, b: &str, sc: &str) -> Option<String> {
+    let cur = dp_table(DP_PREFIX, p)?;
+    let how = dp_table(forms, cur);
+    let pa = dp_amount(a, lang)?;
+    let pb = dp_amount(b, lang)?;
+    if s.contains('-') && s != "-" && !dp_less(&pa, &pb) {
+        return None;
+    }
+    let (fa, fb) = (dp_flat(a, &pa.0, &pa.1, sc), dp_flat(b, &pb.0, &pb.1, sc));
+    if let Some(own) = dp_table(DP_RANGE_FORM, lang).and_then(|t| dp_table(t, cur)) {
+        return Some(own.replace("{a}", &fa).replace("{b}", &format!("{fb}{sc}")));
+    }
+    let tmpl = match how {
+        Some(How::T(s)) => Some(s),
+        Some(How::Pair(_, many)) => Some(many),
+        _ => None,
+    };
+    // a form that is the prefix and the amount (CA${n}, {P}${n})
+    let pfx = tmpl
+        .and_then(|s| s.strip_suffix("${n}"))
+        .filter(|x| *x == "{P}" || ((1..=2).contains(&x.len()) && x.bytes().all(|b| b.is_ascii_uppercase())));
+    if (how.is_none() || matches!(how, Some(How::W)) || pfx.is_some()) && dp_has_words(lang, cur) {
+        return dp_range_words(lang, cur, &fa, &fb, &pb, sc);
+    }
+    if how.is_none() || pfx.is_some() {
+        let q = match pfx {
+            Some(x) if x != "{P}" => x,
+            _ => p,
+        };
+        return Some(format!("{fa}-{fb}{sc} {q}$"));
+    }
+    Some(tmpl?.replace("{P}", p).replace("{n}", &format!("{fa}-{fb}{sc}")))
+}
+
+fn all_dollar_prefix(t: String, c: &mut Ctx) -> String {
+    if !t.contains('$') {
+        return t;
+    }
+    let lang = c.lang().to_string();
+    let forms: &[(&str, How)] = dp_table(DP_FORM, &lang).unwrap_or(&[]);
+    let e = edge(&lang);
+    let pre = DP_PREFIX.iter().map(|(p, _)| *p).collect::<Vec<_>>().join("|");
+    let amount = r"[0-9]+(?:[.,][0-9]+|[ \x{A0}\x{202F}][0-9]{3}(?![0-9]))*";
+    let glued = GLUED.contains(&lang.as_str());
+    let scale = match dp_table(DP_SCALE, &lang) {
+        Some(s) => format!("({s}{})?", if glued { r"(?![A-Za-z])" } else { r"(?![^\W\d_])" }),
+        None => "()".to_string(),
+    };
+    let unit = r"(/[^\W\d_]{1,12})?";
+    let sep = r"([ \x{A0}]?[-–~〜][ \x{A0}]?)";
+    // (a range the range pass left, HK$5-HK$10 with another prefix, stays as typed; a spaced hyphen is a subtraction
+    // there, HK$10 - HK$3, and each amount is read)
+    let tail = format!(r"(?![{e}$]|[.,][0-9]|:[A-Za-z]|(?:-|[ \x{{A0}}]?[–~〜][ \x{{A0}}]?)(?:[A-Z]{{1,2}}\$)?[0-9])");
+    let lb = format!(r"(?<![{e}$/@.,:=+\-–~])");
+    // US $5 → US$5 (the letters apart from the sign)
+    let t = c.sub(&rx(&format!(r"{lb}(US|HK|AU|CA|NZ|SG|NT) \$(?=[0-9])")), &t, |m| {
+        let start = m.get(0).expect("group 0").start();
+        let before = rx(r"(\w+)[ \t]*$").captures(&t[..start]).ok().flatten();
+        if before.is_some_and(|b| DP_STOP.contains(&g(&b, 1).to_lowercase().as_str())) {
+            return None;
+        }
+        Some(format!("{}$", g(m, 1)))
+    });
+    // ranges: HK$5-10, HK$5–HK$10, US$5~10 and 5-10 US$
+    let t = c.sub(
+        &rx(&format!(r"{lb}({pre})\$[ \x{{A0}}]?({amount}){sep}(?:\1\$[ \x{{A0}}]?)?({amount}){scale}{tail}")),
+        &t,
+        |m| dp_range(&lang, forms, g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5)),
+    );
+    let t = c.sub(&rx(&format!(r"{lb}({amount}){sep}({amount}){scale}[ \x{{A0}}]?({pre})\$(?![{e}$])")), &t, |m| {
+        dp_range(&lang, forms, g(m, 5), g(m, 1), g(m, 2), g(m, 3), g(m, 4))
+    });
+    // negatives: -HK$5, −US$5, HK$-5, -5 HK$
+    let t = c.sub(&rx(&format!(r"{lb}[-−]({pre})\$[ \x{{A0}}]?({amount}){scale}{unit}{tail}")), &t, |m| {
+        dp_negative(&lang, forms, g(m, 1), g(m, 2), g(m, 3), g(m, 4), m[0].starts_with('-'))
+    });
+    let t = c.sub(&rx(&format!(r"{lb}({pre})\$[ \x{{A0}}]?[-−]({amount}){scale}{unit}{tail}")), &t, |m| {
+        dp_negative(&lang, forms, g(m, 1), g(m, 2), g(m, 3), g(m, 4), false)
+    });
+    let t = c.sub(&rx(&format!(r"{lb}[-−]({amount}){scale}[ \x{{A0}}]?({pre})\$(?![{e}$])")), &t, |m| {
+        dp_negative(&lang, forms, g(m, 3), g(m, 1), g(m, 2), "", false)
+    });
+    // amounts: HK$5, US$ 5, 5 US$
+    let t = c.sub(&rx(&format!(r"{lb}({pre})\$[ \x{{A0}}]?({amount}){scale}{unit}{tail}")), &t, |m| {
+        dp_rewrite(&lang, forms, &m[0], g(m, 1), g(m, 2), g(m, 3), g(m, 4), true)
+    });
+    c.sub(&rx(&format!(r"{lb}({amount}){scale}[ \x{{A0}}]?({pre})\$(?![{e}$])")), &t, |m| {
+        dp_rewrite(&lang, forms, &m[0], g(m, 3), g(m, 1), g(m, 2), "", false)
+    })
 }

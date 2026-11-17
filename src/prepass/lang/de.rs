@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use fancy_regex::Captures;
 
-use super::super::{Ctx, full, g, matches_at_start, py_int, py_int_str, rx, search};
+use super::super::{Ctx, full, g, matches_at_start, py_int, py_int_str, re_escape, rx, search};
 use super::{LangRule, words};
 use crate::text::{is_py_digit, nd_range_start, py_split_ws};
 
@@ -16,7 +16,11 @@ pub(super) const RULES: &[LangRule] = &[
     ("de.abbrev", de_abbrev),
     ("de.roman", de_roman),
     ("de.scale", de_scale),
+    ("de.money-range", de_money_range),
+    ("de.money-minus", de_money_minus),
     ("de.money", de_money),
+    ("de.units", de_units),
+    ("de.spaced-groups", de_spaced_groups),
     ("de.grouped", de_grouped),
     ("de.range", de_range),
     ("de.date", de_date),
@@ -96,14 +100,48 @@ fn set(words: &'static str) -> HashSet<&'static str> {
 
 // ------------------------------------------------------------------------------------------------- number words
 
-const BIG: [&str; 6] = ["million", "millionen", "milliarde", "milliarden", "billion", "billionen"];
+const BIG: [&str; 10] = [
+    "million",
+    "millionen",
+    "milliarde",
+    "milliarden",
+    "billion",
+    "billionen",
+    "billiarde",
+    "billiarden",
+    "trillion",
+    "trillionen",
+];
+/// The grammar's "eins" before a scale word: eins millionen -> eine Million, dreihundert eins millionen ->
+/// dreihunderteine Millionen.
+const BIG_ONE: [(&str, &str); 5] = [
+    ("millionen", "million"),
+    ("milliarden", "milliarde"),
+    ("billionen", "billion"),
+    ("billiarden", "billiarde"),
+    ("trillionen", "trillion"),
+];
 
 /// The grammar's spaced number words as one word below a million: 'zwei hundert sechs und zwanzig' ->
-/// 'zweihundertsechsundzwanzig', 'eine million zwei hundert tausend' -> 'eine Million zweihunderttausend'.
+/// 'zweihundertsechsundzwanzig', 'eine million zwei hundert tausend' -> 'eine Million zweihunderttausend'; its "eins"
+/// before tausend or a scale word is ein / eine (dreihunderteintausend, zwei Milliarden eine Million).
 fn de_join(s: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
-    for w in py_split_ws(s) {
+    let mut ws: Vec<&str> = py_split_ws(s);
+    for i in 0..ws.len() {
+        let mut w = ws[i];
+        let nxt = ws.get(i + 1).copied().unwrap_or("");
+        if w == "eins" && nxt == "tausend" {
+            w = "ein";
+        } else if w == "eins" && BIG.contains(&nxt) {
+            w = "eine";
+            if cur.is_empty()
+                && let Some(&(_, one)) = BIG_ONE.iter().find(|p| p.0 == nxt)
+            {
+                ws[i + 1] = one;
+            }
+        }
         if BIG.contains(&w) {
             if !cur.is_empty() {
                 out.push(std::mem::take(&mut cur));
@@ -443,6 +481,7 @@ const DE_CURRENCIES: &[Currency] = &[
     (&["DKK"], "dänische Krone", "dänische Kronen", "", "f"),
     (&["₺", "TRY"], "Lira", "Lira", "", "f"),
     (&["₹", "INR"], "Rupie", "Rupien", "", "f"),
+    (&["HUF"], "Forint", "Forint", "", "m"),
 ];
 static DE_CUR: LazyLock<HashMap<&str, &Currency>> =
     LazyLock::new(|| DE_CURRENCIES.iter().flat_map(|cur| cur.0.iter().map(move |f| (*f, cur))).collect());
@@ -453,18 +492,30 @@ static DE_CUR_RX: LazyLock<String> = LazyLock::new(|| {
     let alt: Vec<String> = forms.iter().map(|f| f.replace('.', r"\.").replace('$', r"\$")).collect();
     format!("({})", alt.join("|"))
 });
-const AMOUNT: &str = r"([1-9]\d{0,2}(?:\.\d{3})+|\d+)(?:,(\d\d|--?|–))?";
+/// The whole part with periods or spaces between the groups (1.234, 15 000), and one or two decimals (2,5 € is 2,50).
+const AMOUNT: &str = r"([1-9]\d{0,2}(?:\.\d{3})+|[1-9]\d{0,2}(?:[ \u00a0\u202f]\d{3})+|\d+)(?:,(\d\d?|--?|–))?";
+
+/// The digits of a grouped whole part: 1.234 and 15 000 -> 1234, 15000.
+fn de_int(major: &str) -> String {
+    major.replace('.', "").replace(' ', "").replace('\u{a0}', "").replace('\u{202f}', "")
+}
+
+/// `str.isdigit()`.
+fn is_digits(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(is_py_digit)
+}
 
 /// The spoken amount: 'eintausendzweihundertvierunddreißig Euro sechsundfünfzig', 'fünfundvierzig Cent'; one
-/// takes the case (einen Euro after kostet, mit einem Euro).
+/// takes the case (einen Euro after kostet, mit einem Euro); one decimal is tens of cents (2,5 € → zwei Euro
+/// fünfzig).
 fn de_amount(major: &str, minor: &str, cur: &Currency, case: &str) -> Option<String> {
     let (_, sg, pl, sub, gender) = *cur;
-    let digits = major.replace('.', "");
+    let digits = de_int(major);
     let n = py_int(&digits);
-    let cents = if !minor.is_empty() && minor.chars().all(is_py_digit) { py_int(minor) } else { 0 };
-    if cents > 0 && sub.is_empty() {
+    if is_digits(minor) && py_int(minor) > 0 && sub.is_empty() {
         return Some(format!("{digits},{minor} {pl}")); // no minor unit: the grammar reads the decimal
     }
+    let cents = if is_digits(minor) { py_int(&format!("{minor}0").chars().take(2).collect::<String>()) } else { 0 };
     if n == 0 && cents > 0 {
         let c = if cents == 1 { "ein".to_string() } else { de_num(&cents.to_string()) };
         return Some(format!("{c} {sub}"));
@@ -517,24 +568,224 @@ fn de_scale(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(&p), &t, |m| Some(format!("{} {}", g(m, 1), DE_CUR[g(m, 2)].2)))
 }
 
-fn de_money(t: String, c: &mut Ctx) -> String {
+/// A whole number before a currency word or bis: ein (not eins), hunderteins → hundertein.
+fn de_whole(n: u128) -> String {
+    let head = de_num(&n.to_string());
+    if head.ends_with("eins") { head[..head.len() - 1].to_string() } else { head }
+}
+
+/// Scale words de.scale writes (€5-10 Mio. → €5-10 Millionen): a range with one reads fünf bis zehn Millionen Euro.
+const DE_SCALE_WORDS: &str = "Millionen|Million|Milliarden|Milliarde|Billionen|Billion|Tausend|tausend";
+
+/// The value of an amount for comparing: whole part and cents.
+fn de_value(major: &str, minor: &str) -> f64 {
+    let m = if is_digits(minor) { minor } else { "" };
+    let cents: String = format!("{m}00").chars().take(2).collect();
+    py_int(&de_int(major)) as f64 + py_int(&cents) as f64 / 100.0
+}
+
+fn range_say(a: &str, am: &str, b: &str, bm: &str, cur: &Currency, scale: &str) -> Option<String> {
+    if !scale.is_empty() {
+        let ac = if am.is_empty() { String::new() } else { format!(",{am}") };
+        let bc = if bm.is_empty() { String::new() } else { format!(",{bm}") };
+        return Some(format!("{a}{ac} bis {b}{bc} {scale} {}", cur.2));
+    }
+    if !am.is_empty() || !bm.is_empty() {
+        return Some(format!("{} bis {}", de_amount(a, am, cur, "nom")?, de_amount(b, bm, cur, "nom")?));
+    }
+    Some(format!("{} bis {} {}", de_whole(py_int(&de_int(a))), de_whole(py_int(&de_int(b))), cur.2))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn range_ok(t: &str, end: usize, a: &str, am: &str, b: &str, bm: &str, sep: &str, spaced: bool, both: bool) -> bool {
+    if de_value(a, am) >= de_value(b, bm) || search(r"=|\bgleich\b", t[end..].split('\n').next().unwrap_or("")) {
+        return false;
+    }
+    !(sep == "-" && spaced && !both)
+}
+
+fn de_money_range(t: String, c: &mut Ctx) -> String {
     let cur = &*DE_CUR_RX;
-    let t = c.sub(&rx(&format!(r"(?<![\w.,]){AMOUNT} ?{cur}(?!\w)")), &t, |m| {
-        de_amount(g(m, 1), g(m, 2), DE_CUR[g(m, 3)], de_case(&t[..start(m)]))
-    });
-    let t = c.sub(&rx(&format!(r"(?<![\w.]){cur}( ?){AMOUNT}(?![\w]|[.,]\d)")), &t, |m| {
-        let (k, space) = (g(m, 1), g(m, 2));
-        if k == "Fr." || (space.is_empty() && !is_alpha(k) && !g(m, 3).contains('.')) {
+    let p = format!(
+        r"(?<![\w.,/@~–-]){cur}( ?){AMOUNT}([ \t]*)([-–~])([ \t]*)(?:{cur}( ?))?{AMOUNT}(?: ({DE_SCALE_WORDS})(?!\w))?(?![\w]|[.,]\d|[ \t]?[-–~][ \t]?\d| ?{cur}(?!\w))"
+    );
+    let t = c.sub(&rx(&p), &t, |m| {
+        let (k, a, am, sp1, sep, sp2, k2, b, bm, scale) =
+            (g(m, 1), g(m, 3), g(m, 4), g(m, 5), g(m, 6), g(m, 7), g(m, 8), g(m, 10), g(m, 11), g(m, 12));
+        if k == "Fr." || (!k2.is_empty() && DE_CUR[k2].1 != DE_CUR[k].1) {
             return None;
         }
-        de_amount(g(m, 3), g(m, 4), DE_CUR[k], de_case(&t[..start(m)]))
+        if !range_ok(&t, end(m), a, am, b, bm, sep, !sp1.is_empty() || !sp2.is_empty(), !k2.is_empty()) {
+            return None;
+        }
+        range_say(a, am, b, bm, DE_CUR[k], scale)
     });
-    c.sub(&rx(&format!(r"(?<![\w.,])(\d+,\d+) ?{cur}(?!\w)")), &t, |m| {
-        Some(format!("{} {}", g(m, 1), DE_CUR[g(m, 2)].2))
+    let p = format!(r"(?<![\w.,/@~–-]){AMOUNT}(?: ?{cur})?([ \t]*)([-–~])([ \t]*){AMOUNT} ?{cur}(?!\w)");
+    c.sub(&rx(&p), &t, |m| {
+        let (a, am, k1, sp1, sep, sp2, b, bm, k) =
+            (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5), g(m, 6), g(m, 7), g(m, 8), g(m, 9));
+        if !k1.is_empty() && DE_CUR[k1].1 != DE_CUR[k].1 {
+            return None;
+        }
+        if !range_ok(&t, end(m), a, am, b, bm, sep, !sp1.is_empty() || !sp2.is_empty(), !k1.is_empty()) {
+            return None;
+        }
+        range_say(a, am, b, bm, DE_CUR[k], "")
+    })
+}
+
+fn de_money_minus(t: String, c: &mut Ctx) -> String {
+    let cur = &*DE_CUR_RX;
+    let t = c.sub(&rx(&format!(r"(?<![\w.,)\]%/-])-{AMOUNT} ?{cur}(?!\w)")), &t, |m| {
+        Some(format!("minus {}", de_amount(g(m, 1), g(m, 2), DE_CUR[g(m, 3)], "nom")?))
+    });
+    let sign_first = |m: &Captures<'_, str>| {
+        if g(m, 1) == "Fr." {
+            return None;
+        }
+        Some(format!("minus {}", de_amount(g(m, 3), g(m, 4), DE_CUR[g(m, 1)], "nom")?))
+    };
+    let t = c.sub(&rx(&format!(r"(?<![\w.,)\]%/-])-{cur}( ?){AMOUNT}(?![\w]|[.,]\d)")), &t, sign_first);
+    c.sub(&rx(&format!(r"(?<![\w.,/-]){cur}( ?)-{AMOUNT}(?![\w]|[.,]\d)")), &t, sign_first)
+}
+
+/// A unit after a price and a slash: 5 €/kg → pro Kilo; a capitalised word (Monat, Jahr, Person, Nacht) is read as
+/// it is.
+const DE_PER: &[(&str, &str)] = &[
+    ("kg", "Kilo"),
+    ("g", "Gramm"),
+    ("l", "Liter"),
+    ("L", "Liter"),
+    ("ml", "Milliliter"),
+    ("m²", "Quadratmeter"),
+    ("m2", "Quadratmeter"),
+    ("qm", "Quadratmeter"),
+    ("m³", "Kubikmeter"),
+    ("m", "Meter"),
+    ("km", "Kilometer"),
+    ("kWh", "Kilowattstunde"),
+    ("MWh", "Megawattstunde"),
+    ("h", "Stunde"),
+    ("Std.", "Stunde"),
+    ("Std", "Stunde"),
+    ("Min.", "Minute"),
+    ("min", "Minute"),
+    ("Stk.", "Stück"),
+    ("Stk", "Stück"),
+    ("St.", "Stück"),
+];
+static DE_PER_RX: LazyLock<String> = LazyLock::new(|| {
+    let mut keys: Vec<&str> = DE_PER.iter().map(|p| p.0).collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(len(k)));
+    let alt: Vec<String> = keys.iter().map(|k| re_escape(k)).collect();
+    format!(r"(?:/({}|[A-ZÄÖÜ][a-zäöüß]+)(?![\w/²³]))?", alt.join("|"))
+});
+
+/// ' pro Kilo' for /kg ('' without a unit); an abbreviation's period stays as a sentence end at the end of the text
+/// or a line or before a capitalised word.
+fn de_per(unit: &str, rest: &str) -> String {
+    if unit.is_empty() {
+        return String::new();
+    }
+    let word = DE_PER.iter().find(|p| p.0 == unit).map_or(unit, |p| p.1);
+    let end = if unit.ends_with('.') && (matches_at_start(END_RX, rest) || matches_at_start(NEXT_CAP_RX, rest)) {
+        "."
+    } else {
+        ""
+    };
+    format!(" pro {word}{end}")
+}
+
+fn de_money(t: String, c: &mut Ctx) -> String {
+    let cur = &*DE_CUR_RX;
+    let per = &*DE_PER_RX;
+    let t = c.sub(&rx(&format!(r"(?<![\w.,]){AMOUNT} ?{cur}(?!\w){per}")), &t, |m| {
+        Some(de_amount(g(m, 1), g(m, 2), DE_CUR[g(m, 3)], de_case(&t[..start(m)]))? + &de_per(g(m, 4), &t[end(m)..]))
+    });
+    let t = c.sub(&rx(&format!(r"(?<![\w.]){cur}( ?){AMOUNT}(?![\w]|[.,]\d){per}")), &t, |m| {
+        let (k, space, unit) = (g(m, 1), g(m, 2), g(m, 5));
+        if k == "Fr." || (space.is_empty() && !is_alpha(k) && !g(m, 3).contains('.') && unit.is_empty()) {
+            return None;
+        }
+        Some(de_amount(g(m, 3), g(m, 4), DE_CUR[k], de_case(&t[..start(m)]))? + &de_per(unit, &t[end(m)..]))
+    });
+    c.sub(&rx(&format!(r"(?<![\w.,])(\d+,\d+) ?{cur}(?!\w){per}")), &t, |m| {
+        Some(format!("{} {}{}", g(m, 1), DE_CUR[g(m, 2)].2, de_per(g(m, 3), &t[end(m)..])))
+    })
+}
+
+/// Unit abbreviations after a grouped number: (abbreviation, plural word).
+const DE_UNITS: &[(&str, &str)] = &[
+    ("km²", "Quadratkilometer"),
+    ("km", "Kilometer"),
+    ("m²", "Quadratmeter"),
+    ("m³", "Kubikmeter"),
+    ("m", "Meter"),
+    ("cm", "Zentimeter"),
+    ("mm", "Millimeter"),
+    ("kg", "Kilogramm"),
+    ("mg", "Milligramm"),
+    ("g", "Gramm"),
+    ("t", "Tonnen"),
+    ("ml", "Milliliter"),
+    ("l", "Liter"),
+    ("ha", "Hektar"),
+    ("kWh", "Kilowattstunden"),
+    ("MWh", "Megawattstunden"),
+    ("kW", "Kilowatt"),
+    ("MW", "Megawatt"),
+    ("W", "Watt"),
+    ("h", "Stunden"),
+    ("min", "Minuten"),
+    ("s", "Sekunden"),
+];
+static DE_UNITS_RX: LazyLock<String> = LazyLock::new(|| {
+    let mut keys: Vec<&str> = DE_UNITS.iter().map(|p| p.0).collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(len(k)));
+    format!("({})", keys.join("|"))
+});
+
+fn de_units(t: String, c: &mut Ctx) -> String {
+    let units = &*DE_UNITS_RX;
+    let p = format!(
+        r"(?<![\w.,/-])([1-9]\d{{0,2}}(?:\.\d{{3}})+|[1-9]\d{{0,2}}(?:[ \u00a0\u202f]\d{{3}})+)( ?){units}(?![\w/²³-]|[.,]\d)"
+    );
+    let t = c.sub(&rx(&p), &t, |m| {
+        let word = DE_UNITS.iter().find(|u| u.0 == g(m, 3)).map_or("", |u| u.1);
+        Some(format!("{} {word}", de_num(&py_int(&de_int(g(m, 1))).to_string())))
+    });
+    c.sub(&rx(r"(?<![\w.,/=+*^×-])(\d+)(?:,(\d+))?( ?)t(?![\w/'’-]|\.\w)"), &t, |m| {
+        let (n, dec) = (g(m, 1), g(m, 2));
+        let head = &t[..start(m)];
+        let line = format!(
+            "{}{}",
+            &head[head.rfind('\n').map_or(0, |p| p + 1)..],
+            t[end(m)..].split('\n').next().unwrap_or("")
+        );
+        if search(r"=|\bgleich\b", &line) || search(r"[-+*/×^÷][ \t]*$", head) {
+            return None;
+        }
+        if !dec.is_empty() {
+            return Some(format!("{} Tonnen", words(&format!("{n},{dec}"), "de")));
+        }
+        if n == "1" {
+            return Some(format!("{} Tonne", de_one_word("f", de_case(head))));
+        }
+        Some(format!("{} Tonnen", de_num(&py_int(n).to_string())))
     })
 }
 
 // ------------------------------------------------------------------------------------------- grouped numbers (S04)
+
+fn de_spaced_groups(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(r"(?<![\w.,+/-])([1-9]\d{0,2}(?:[ \u00a0\u202f]\d{3}){2,})(?![\d]|[.,]\d|[ \u00a0\u202f]\d)"), &t, |m| {
+        let groups: Vec<&str> = g(m, 1).split([' ', '\u{a0}', '\u{202f}']).collect();
+        if groups.len() < 4 && !groups[1..].contains(&"000") {
+            return None;
+        }
+        Some(groups.concat())
+    })
+}
 
 fn de_grouped(t: String, c: &mut Ctx) -> String {
     let p = r#"(?<![^\s(\["'„“»«-])([1-9]\d{0,2}(?:\.\d{3})+)(?=(?:,\d+)?(?:$|[\s)\]"'»«“”]|[.,;:!?](?!\d)))"#;

@@ -4,24 +4,43 @@
 #[allow(unused_imports)]
 use super::super::{Ctx, g, py_int, rx, tpl};
 use super::hi::{
-    ACRONYMS, GUJR, ampm, clock_hourword, glued, half_scale, halves, latin_number, minus, quarters, ranges, regnal,
-    score, years,
+    ACRONYMS, GUJR, ampm, big, clock_hourword, codes, glued, half_scale, halves, latin_number, minus, money_minus,
+    money_range, per_unit, quarters, ranges, regnal, score, space_groups, unit_groups, years,
 };
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("gu.space-groups", gu_space_groups),
+    ("gu.big", gu_big),
     ("gu.glued", gu_glued),
     ("gu.year", gu_year),
     ("gu.ampm", gu_ampm),
     ("gu.clock-hourword", gu_clock),
+    ("gu.money-range", gu_money_range),
     ("gu.minus", gu_minus),
     ("gu.latin-number", gu_latin_number),
     ("gu.score", gu_score),
     ("gu.range", gu_range),
+    ("gu.per", gu_per),
+    ("gu.codes", gu_codes),
     ("gu.half-scale", gu_half_scale),
+    ("gu.unit-groups", gu_unit_groups),
     ("gu.regnal", gu_regnal),
 ];
+const GU_SCALES: &[&str] = &["લાખ", "કરોડ", "હજાર", "અબજ", "ખરબ"];
+
+fn gu_space_groups(t: String, c: &mut Ctx) -> String {
+    space_groups(t, c)
+}
+
+fn gu_big(t: String, c: &mut Ctx) -> String {
+    big(t, c, "gu", "માઇનસ")
+}
+
+fn gu_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, "gu", "થી", GUJR, GU_SCALES)
+}
 
 const MONTHS: &[&str] = &[
     "જાન્યુઆરી",
@@ -93,6 +112,7 @@ fn gu_clock(t: String, c: &mut Ctx) -> String {
 }
 
 fn gu_minus(t: String, c: &mut Ctx) -> String {
+    let t = money_minus(t, c, "માઇનસ", GUJR);
     minus(
         t,
         c,
@@ -123,7 +143,22 @@ fn gu_latin_number(t: String, c: &mut Ctx) -> String {
 }
 
 fn gu_range(t: String, c: &mut Ctx) -> String {
-    ranges(t, c, GUJR, "થી", &["થી", "માં", "ના", "ની", "નું", "નો", "ને", "એ", "છે", "હતા", "હતી", "હતો", "અને", "કે", "સુધી"])
+    ranges(
+        t,
+        c,
+        GUJR,
+        "થી",
+        &["થી", "માં", "ના", "ની", "નું", "નો", "ને", "એ", "છે", "હતા", "હતી", "હતો", "અને", "કે", "સુધી"],
+        "[-–~～〜]",
+    )
+}
+
+fn gu_codes(t: String, c: &mut Ctx) -> String {
+    codes(t, c, "gu", GUJR, &[("Tk.", "ટાકા", "પૈસા"), ("Tk", "ટાકા", "પૈસા")], GU_SCALES)
+}
+
+fn gu_per(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, "gu", "પ્રતિ", GUJR, &["રૂપિયા", "રૂપિયો"])
 }
 
 fn gu_half_scale(t: String, c: &mut Ctx) -> String {
@@ -137,6 +172,10 @@ fn gu_half_scale(t: String, c: &mut Ctx) -> String {
         &|n| halves(n, "gu", "દોઢ", "અઢી", "સાડા", " "),
         false,
     )
+}
+
+fn gu_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "gu")
 }
 
 const GU_ORD: &[&str] = &["પ્રથમ", "દ્વિતીય", "તૃતીય", "ચતુર્થ", "પંચમ", "ષષ્ઠ", "સપ્તમ", "અષ્ટમ", "નવમ", "દશમ"];

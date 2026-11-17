@@ -6,6 +6,10 @@ use super::super::{Ctx, g, py_int, rx, tpl};
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("id.groups", id_groups),
+    ("id.grouping", id_grouping),
+    ("id.money", id_money),
+    ("id.per", id_per),
     ("id.minus-temp", id_minus_temp),
     ("id.regnal", id_regnal),
     ("id.chat-abbrev", id_chat_abbrev),
@@ -94,4 +98,65 @@ fn id_time(t: String, c: &mut Ctx) -> String {
 
 fn id_minus_temp(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(r"(?<![\w.,\-])-(?=\d+(?:[.,]\d+)? ?(?:°[CF]?|℃|℉|derajat(?!\w)))"), &t, "minus ")
+}
+
+// ------------------------------------------------------------------------------------------------- money (Nov 16)
+
+/// Signs and codes with a minor unit.
+const SIGN: &str = r"(?:[€$£]|(?<![A-Za-z])(?:RM|S\$|USD|EUR|GBP|MYR|SGD)(?![A-Za-z]) ?)";
+const SIGN_ANY: &str =
+    r"(?:[€$£¥]|(?<![A-Za-z])(?:RM|Rp|S\$|USD|EUR|GBP|MYR|SGD|IDR|JPY|CNY|AUD|HKD|THB)(?![A-Za-z]) ?)";
+const CUR_AFTER: &str = r"(?:[€$£]|(?:RM|USD|EUR|GBP|MYR|SGD)(?![A-Za-z]))";
+const SCALE: &str = r"(?![A-Za-z]| ?(?:ribu|juta|miliar|bilion|billion|trilion|triliun|rb|jt)(?!\w))";
+
+fn id_money(t: String, c: &mut Ctx) -> String {
+    let pat = format!(r"(?<![\w.,])({SIGN}\d+(?:[.,]\d{{3}})*)([.,])(\d)(?![\d.,]\d|\d){SCALE}");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}{}{}0", g(m, 1), g(m, 2), g(m, 3))));
+    let pat =
+        format!(r"(?<![\w.,])(?<!\d[\-–—~～〜])(?<!\d [\-–—~～〜])(\d+(?:[.,]\d{{3}})*)([.,])(\d)( ?{CUR_AFTER})");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}{}{}0{}", g(m, 1), g(m, 2), g(m, 3), g(m, 4))));
+    c.sub_tpl(&rx(&format!(r"(?<![\w.,])({SIGN_ANY}?\d[\d.,]*) ?[~～〜] ?(?={SIGN_ANY}?\d)")), &t, r"\1-")
+}
+
+fn id_per(t: String, c: &mut Ctx) -> String {
+    let money = format!(
+        r"(?<![\w.,])({SIGN_ANY}\d[\d.,]*(?: ?(?:ribu|juta|rb|jt))?|\d[\d.,]* ?(?:{SIGN_ANY}|(?:ringgit|euro|dolar|rupiah|sen|ribu|juta|rb|jt)(?!\w)))"
+    );
+    c.sub(&rx(&format!(r"{money} ?/ ?([^\W\d_]+)")), &t, |m| {
+        if !words(&m[0], "id").contains('/') {
+            return None; // the grammar reads it (100 €/bulan → seratus euro per bulan)
+        }
+        Some(format!("{} per {}", g(m, 1), g(m, 2)))
+    })
+}
+
+fn id_groups(t: String, c: &mut Ctx) -> String {
+    let pat = concat!(
+        r"(?<![\w.,/:+\-–])(?<!\d[ \x{A0}\x{202F}])([1-9]\d{0,2}(?:[ \x{A0}\x{202F}]\d{3})+)(?:[.,](\d{1,2})(?!\d))?",
+        r"(?!\d|[.,]\d)(?![ \x{A0}\x{202F}]\d)"
+    );
+    let after = format!(r"[ \x{{A0}}\x{{202F}}]?(?:{SIGN_ANY}|[^\W\d_])");
+    c.sub(&rx(pat), &t, |m| {
+        let gaps = g(m, 1).chars().filter(|&ch| matches!(ch, ' ' | '\u{a0}' | '\u{202f}')).count();
+        if gaps < 2
+            && !super::super::search(r"[$€£¥₩₱฿₫₹] ?$", &t[..m.get(0).expect("group 0").start()])
+            && !super::super::matches_at_start(&after, &t[m.get(0).expect("group 0").end()..])
+        {
+            return None;
+        }
+        let head: String =
+            g(m, 1).chars().map(|ch| if matches!(ch, ' ' | '\u{a0}' | '\u{202f}') { '.' } else { ch }).collect();
+        Some(format!("{head}{}", if g(m, 2).is_empty() { String::new() } else { format!(",{}", g(m, 2)) }))
+    })
+}
+
+fn id_grouping(t: String, c: &mut Ctx) -> String {
+    let pat = r"(?<![\d.,])(\d{1,3}(?:,\d{3}){2,}|\d{1,3}(?:,\d{3})+(?=\.\d))(?:\.(\d+))?(?![\d,]|\.\d)";
+    c.sub(&rx(pat), &t, |m| {
+        Some(format!(
+            "{}{}",
+            g(m, 1).replace(',', "."),
+            if g(m, 2).is_empty() { String::new() } else { format!(",{}", g(m, 2)) }
+        ))
+    })
 }

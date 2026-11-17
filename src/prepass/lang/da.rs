@@ -8,19 +8,26 @@ use std::sync::LazyLock;
 
 use fancy_regex::Captures;
 
-use super::super::{Ctx, g, matches_at_start, py_int, rx};
+use super::super::{Ctx, g, matches_at_start, py_int, re_escape, rx, search};
 use super::{LangRule, words};
 
 pub(super) const RULES: &[LangRule] = &[
     ("da.dash-price", da_dash_price),
+    ("da.money-range", da_money_range),
+    ("da.scale-money", da_scale_money),
+    ("da.money-decimal", da_money_decimal),
     ("da.money-groups", da_money_groups),
+    ("da.money-code", da_money_code),
+    ("da.per-unit", da_per_unit),
     ("da.scale", da_scale),
     ("da.units", da_units),
+    ("da.units-more", da_units_more),
     ("da.abbrev", da_abbrev),
     ("da.time", da_time),
     ("da.date", da_date),
     ("da.decade", da_decade),
     ("da.year", da_year),
+    ("da.unit-groups", da_unit_groups),
 ];
 
 const MONTHS: [&str; 12] = [
@@ -210,13 +217,225 @@ fn da_dash_price(t: String, c: &mut Ctx) -> String {
     c.sub_tpl(&rx(r"(\d),(?:--?|–|—)(?![\w])"), &t, r"\1")
 }
 
+/// The currency signs and codes of the grammar's currency table (data/da/currencies.tsv, without Rs), longest first.
+const DA_CUR: &str = r"kr\.|US\$|CA\$|MX\$|DKK|USD|CAD|AUD|EUR|GBP|JPY|CNY|CHF|INR|RUB|KRW|TRY|ILS|UAH|VND|BDT|NGN|PHP|THB|AMD|A\$|R\$|kr|\$|€|£|¥|₹|₽|₩|₺|₪|₴|₫|৳|₦|₱|฿|֏";
+const DA_GROUPED: &str = r"[1-9]\d{0,2}(?:\.\d{3})+|[1-9]\d{0,2}(?:[ \x{A0}]\d{3})+";
+
+fn da_ungroup(s: &str) -> String {
+    s.chars().filter(|&ch| !matches!(ch, '.' | ' ' | '\u{a0}')).collect()
+}
+
 fn da_money_groups(t: String, c: &mut Ctx) -> String {
-    let t = c.sub(&rx(r"(?<!\w)(kr\.?|DKK|€) ?([1-9]\d{0,2}(?:\.\d{3})+)(?=(?:,\d\d)?(?![\w.]|,\d))"), &t, |m| {
-        Some(format!("{} {}", g(m, 1), g(m, 2).replace('.', "")))
+    let before = format!(r"(?<!\w)({DA_CUR}) ?({DA_GROUPED})(?=(?:,\d\d)?(?![\w]|[.,]\d|[ \x{{A0}}]\d))");
+    let t = c.sub(&rx(&before), &t, |m| Some(format!("{} {}", g(m, 1), da_ungroup(g(m, 2)))));
+    let after = format!(r"(?<![\w.,])(?<!\d[ \x{{A0}}])({DA_GROUPED})(?=(?:,\d\d)? ?(?:{DA_CUR}|kroner|euro)(?!\w))");
+    c.sub(&rx(&after), &t, |m| Some(da_ungroup(g(m, 1))))
+}
+
+// ------------------------------------------------------------------------- money: ranges, decimals, codes, rates
+// (shared with nb.rs and sv.rs, each with its own currency alternation)
+
+pub(super) const SIGNS: &str = r"[$€£¥₹₽₩₺₪₴₫৳₦₱฿֏]";
+pub(super) const NORDIC_SCALE: &str = r"mio\.?|mia\.?|mill\.?|mln\.?|mrd\.?|milj\.?|mn\.?|md\.?|millioner|million|milliarder|milliard|miljoner|miljon|miljarder|miljard|tusind|tusen";
+
+/// The money range forms the grammar leaves unread: a tilde between two numbers is a range (5~10 → 5-10), a minus
+/// written after a sign goes before it (€-5 → -€5), a sign before a range goes after it (€5-10 → 5-10 €). `cur` is
+/// the alternation of the signs and codes the grammar reads after an amount.
+pub(super) fn money_range(t: String, c: &mut Ctx, cur: &str) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<=\d) ?~ ?(?=[-−]?(?:{cur})?\d)")), &t, "-");
+    let t = c.sub_tpl(&rx(&format!(r"(?<![\w.,\-−])({SIGNS}) ?[-−](?=\d)")), &t, r"-\1");
+    let p = format!(
+        r"(?<![\w.,])({cur}) ?(\d+(?:[.,]\d+)*)( ?[-–] ?)(\d+(?:[.,]\d+)*)(?![\w]|[.,]\d|[-–]\d| ?(?:{cur})(?!\w)| (?:{NORDIC_SCALE})(?!\w))"
+    );
+    c.sub(&rx(&p), &t, |m| Some(format!("{}{}{} {}", g(m, 2), g(m, 3), g(m, 4), g(m, 1))))
+}
+
+/// '2,5' -> '2,50' (one decimal next to a currency is tens of cents); other numbers unchanged.
+pub(super) fn pad_cents(n: &str) -> String {
+    if search(r",\d$", n) { format!("{n}0") } else { n.to_string() }
+}
+
+/// Amounts with one decimal next to a currency are written with two (2,5 kr → 2,50 kr, kr. 2,5 → kr. 2,50): the
+/// grammar read 2,5 as 2 and 5 øre. A range whose first number has a decimal is written with the currency after each
+/// number and the range word (2,50-3,50 kr → 2,50 kr til 3,50 kr), the form the grammar reads. `num` is the
+/// language's number pattern (grouped or plain, with an optional decimal).
+pub(super) fn money_decimal(
+    t: String,
+    c: &mut Ctx,
+    cur_after: &str,
+    cur_before: &str,
+    num: &str,
+    to_word: &str,
+    pad: bool,
+) -> String {
+    let p = format!(r"(?<![\w.,])(?<!\d[ \x{{A0}}])(-?{num})(?:( ?[-–] ?)({num}))?( ?)({cur_after})(?![\w])");
+    let t = c.sub(&rx(&p), &t, |m| {
+        let (a, sep, sp, cur) = (g(m, 1), g(m, 2), g(m, 4), g(m, 5));
+        let b = m.get(3).map(|x| x.as_str());
+        let pc = |s: &str| if pad { pad_cents(s) } else { s.to_string() };
+        let out = match b {
+            Some(b) if a.contains(',') => format!("{}{sp}{cur} {to_word} {}{sp}{cur}", pc(a), pc(b)),
+            _ if !pad => return None,
+            Some(b) => format!("{}{sep}{}{sp}{cur}", pad_cents(a), pad_cents(b)),
+            None => format!("{}{sp}{cur}", pad_cents(a)),
+        };
+        if out == g(m, 0) { None } else { Some(out) }
     });
-    c.sub(&rx(r"(?<![\w.,])([1-9]\d{0,2}(?:\.\d{3})+)(?=(?:,\d\d)? ?(?:kr\b|kroner\b|DKK\b|€|euro\b))"), &t, |m| {
-        Some(g(m, 1).replace('.', ""))
+    if !pad {
+        return t;
+    }
+    let p = format!(r"(?<!\w)({cur_before})( ?-?)({num})(?![\w]|[.,]\d)(?! ?(?:{NORDIC_SCALE})(?!\w))");
+    c.sub(&rx(&p), &t, |m| Some(format!("{}{}{}", g(m, 1), g(m, 2), pad_cents(g(m, 3)))))
+}
+
+/// A price per unit, N CUR/UNIT (also CUR pr. UNIT, CUR per UNIT): the slash and the unit are written as the words
+/// of `table` [(written, spoken)] (kr./md. → kr. om måneden); the grammar read the amount and left the rest.
+pub(super) fn per_unit(t: String, c: &mut Ctx, cur: &str, table: &[(&str, &str)]) -> String {
+    let mut sorted: Vec<&(&str, &str)> = table.iter().collect();
+    sorted.sort_by_key(|x| std::cmp::Reverse(x.0.chars().count()));
+    let alt: Vec<String> = sorted.iter().map(|x| re_escape(x.0)).collect();
+    let p = format!(r"(\d)( ?)({cur})(?:/| pr\.? | per )({})(?![\w²³/])", alt.join("|"));
+    c.sub(&rx(&p), &t, |m| {
+        let unit = g(m, 4);
+        let spoken = table.iter().rev().find(|x| x.0 == unit)?.1;
+        let dot = if unit.ends_with('.') && matches_at_start(r"[ \t]*(?:\n|$)", &t[end(m)..]) { "." } else { "" };
+        Some(format!("{}{}{} {spoken}{dot}", g(m, 1), g(m, 2), g(m, 3)))
     })
+}
+
+/// A grouped number before a unit is written without the groups when the grammar reads the unit only then
+/// (2.000 km → 2000 km: it said “to tusind km”, and “1.500 km” as 1,5).
+pub(super) fn unit_groups(t: String, c: &mut Ctx, lang: &str, grouped: &str) -> String {
+    let p = format!(r"(?<![\w.,])(?<!\d[ \x{{A0}}])({grouped})(,\d+)?( ?)([^\W\d_][\w²³/]*)(?![\w.,]\d)");
+    c.sub(&rx(&p), &t, |m| {
+        let (num, dec, sp, tok) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+        let plain = da_ungroup(num) + dec;
+        let new = words(&format!("{plain}{sp}{tok}"), lang);
+        if new == words(g(m, 0), lang) || search(r"\d", &new) {
+            return None;
+        }
+        Some(format!("{plain}{sp}{tok}"))
+    })
+}
+
+/// CUR N scale → N scale CURWORD, N scale CUR → N scale CURWORD: the currency is written as the grammar's own
+/// plural (words('5 €') minus the number), which it reads after a scale word.
+pub(super) fn scale_money(t: String, c: &mut Ctx, cur: &str, num: &str, lang: &str, keep_after: &[&str]) -> String {
+    let five = format!("{} ", words("5", lang));
+    let curword = |tok: &str| -> Option<String> {
+        let w = words(&format!("5 {tok}"), lang);
+        if w.starts_with(&five) && !search(r"\d", &w) { Some(w[five.len()..].to_string()) } else { None }
+    };
+    let p = format!(r"(?<!\w)({cur})( ?)(-?{num}) ?({NORDIC_SCALE})(?!\w)");
+    let t = c.sub(&rx(&p), &t, |m| {
+        let cw = curword(g(m, 1))?;
+        let dot = if g(m, 4).ends_with('.') && matches_at_start(r"[ \t]*(?:\n|$)", &t[end(m)..]) { "." } else { "" };
+        Some(format!("{} {} {cw}{dot}", g(m, 3), g(m, 4)))
+    });
+    let p = format!(r"(?<![\w.,])(-?{num}) ?({NORDIC_SCALE}) ?({cur})(?!\w)");
+    c.sub(&rx(&p), &t, |m| {
+        if keep_after.contains(&g(m, 3)) {
+            return None;
+        }
+        let cw = curword(g(m, 3))?;
+        let dot = if g(m, 3).ends_with('.') && matches_at_start(r"[ \t]*(?:\n|$)", &t[end(m)..]) { "." } else { "" };
+        Some(format!("{} {} {cw}{dot}", g(m, 1), g(m, 2)))
+    })
+}
+
+/// The first match of `pat` in `s` with `word ` put before it, or None.
+fn prefix_first(pat: &str, s: &str, word: &str) -> Option<String> {
+    let r = rx(pat);
+    let m = r.find(s).ok()??;
+    Some(format!("{}{word} {}{}", &s[..m.start()], m.as_str(), &s[m.end()..]))
+}
+
+/// N SEK / SEK N (codes the grammar leaves as typed): the grammar's reading of N kr with the country's adjective
+/// before krone/kroner (5 SEK → fem svenske kroner).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn kroner_code(
+    t: String,
+    c: &mut Ctx,
+    lang: &str,
+    codes: &[(&str, (&str, &str))],
+    kr: &str,
+    one_rx: &str,
+    many_rx: &str,
+    num: &str,
+    ungroup_rx: &str,
+) -> String {
+    let say = |code: &str, amount: String| -> Option<String> {
+        let amount = rx(&format!(r"{ungroup_rx}(?=\d{{3}}(?!\d))")).replace_all(&amount, "").to_string();
+        let w = words(&format!("{amount} {kr}"), lang);
+        let (sg, pl) = codes.iter().find(|x| x.0 == code)?.1;
+        let new = prefix_first(many_rx, &w, pl).or_else(|| prefix_first(one_rx, &w, sg))?;
+        if new == w || search(r"\d", &new) { None } else { Some(new) }
+    };
+    let alt: Vec<&str> = codes.iter().map(|x| x.0).collect();
+    let alt = alt.join("|");
+    let amt = format!(r"-?{num}(?:[-–]\d+)?");
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({amt}) ?({alt})(?!\w)")), &t, |m| say(g(m, 2), pad_cents(g(m, 1))));
+    c.sub(&rx(&format!(r"(?<!\w)({alt}) ?({amt})(?![\d]|[.,]\d)")), &t, |m| say(g(m, 1), pad_cents(g(m, 2))))
+}
+
+const DA_NUM: &str = r"(?:[1-9]\d{0,2}(?:\.\d{3})+|[1-9]\d{0,2}(?:[ \x{A0}]\d{3})+|\d+)(?:,\d{1,2})?";
+
+fn da_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, DA_CUR)
+}
+
+fn da_scale_money(t: String, c: &mut Ctx) -> String {
+    scale_money(t, c, DA_CUR, DA_NUM, "da", &["kr.", "kr", "DKK"])
+}
+
+fn da_money_decimal(t: String, c: &mut Ctx) -> String {
+    money_decimal(t, c, &format!("{DA_CUR}|kroner|euro"), DA_CUR, DA_NUM, "til", true)
+}
+
+const DA_CODES: &[(&str, (&str, &str))] =
+    &[("SEK", ("svensk", "svenske")), ("NOK", ("norsk", "norske")), ("ISK", ("islandsk", "islandske"))];
+
+fn da_money_code(t: String, c: &mut Ctx) -> String {
+    kroner_code(t, c, "da", DA_CODES, "kr", r"\bkrone\b", r"\bkroner\b", DA_NUM, r"[. \x{A0}]")
+}
+
+const DA_PER: &[(&str, &str)] = &[
+    ("md.", "om måneden"),
+    ("md", "om måneden"),
+    ("mdr.", "om måneden"),
+    ("mnd.", "om måneden"),
+    ("mnd", "om måneden"),
+    ("måned", "om måneden"),
+    ("mdr", "om måneden"),
+    ("år", "om året"),
+    ("dag", "om dagen"),
+    ("døgn", "i døgnet"),
+    ("uge", "om ugen"),
+    ("time", "i timen"),
+    ("t.", "i timen"),
+    ("t", "i timen"),
+    ("h", "i timen"),
+    ("stk.", "per styk"),
+    ("stk", "per styk"),
+    ("styk", "per styk"),
+    ("person", "per person"),
+    ("pers.", "per person"),
+    ("nat", "per nat"),
+    ("kg", "per kilo"),
+    ("kilo", "per kilo"),
+    ("g", "per gram"),
+    ("l", "per liter"),
+    ("liter", "per liter"),
+    ("km", "per kilometer"),
+    ("m²", "per kvadratmeter"),
+    ("m2", "per kvadratmeter"),
+    ("kvm", "per kvadratmeter"),
+    ("m", "per meter"),
+    ("m³", "per kubikmeter"),
+];
+
+fn da_per_unit(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, DA_CUR, DA_PER)
 }
 
 fn da_scale(t: String, c: &mut Ctx) -> String {
@@ -230,6 +449,19 @@ fn da_units(t: String, c: &mut Ctx) -> String {
     let t = c.sub_tpl(&rx(r"(\d ?)kvm\b\.?"), &t, r"\1m²");
     c.sub(&rx(r"(\d ?)(km|dm|cm|mm|m)([23])(?![\w²³/])"), &t, |m| {
         Some(format!("{}{}{}", g(m, 1), g(m, 2), if g(m, 3) == "2" { "²" } else { "³" }))
+    })
+}
+
+fn da_units_more(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(r"(?<![\w.,])(\d+(?:,\d+)?) ?(ha|cl|tsk|spsk)(\.)?(?![\w/²³-])"), &t, |m| {
+        let (sg, pl) = match g(m, 2) {
+            "ha" => ("hektar", "hektar"),
+            "cl" => ("centiliter", "centiliter"),
+            "tsk" => ("teskefuld", "teskefulde"),
+            _ => ("spiseskefuld", "spiseskefulde"),
+        };
+        let dot = if !g(m, 3).is_empty() && matches_at_start(r"[ \t]*(?:\n|$)", &t[end(m)..]) { "." } else { "" };
+        Some(if g(m, 1) == "1" { format!("en {sg}{dot}") } else { format!("{} {pl}{dot}", g(m, 1)) })
     })
 }
 
@@ -337,4 +569,8 @@ static DA_CUES: YearCues = YearCues {
 
 fn da_year(t: String, c: &mut Ctx) -> String {
     nordic_year(t, c, &DA_CUES)
+}
+
+fn da_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "da", DA_GROUPED)
 }

@@ -17,6 +17,14 @@ use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
     ("he.abbrev", he_abbrev),
+    ("he.money-code", he_money_code),
+    ("he.money-minus", he_money_minus),
+    ("he.spaced-groups", he_spaced_groups),
+    ("he.money-range", he_money_range),
+    ("he.money-decimal", he_money_decimal),
+    ("he.money-per", he_money_per),
+    ("he.big", he_big),
+    ("he.hectare", he_hectare),
     ("he.letter-numeral", he_letter_numeral),
     ("he.latin-number", he_latin_number),
     ("he.time", he_time),
@@ -171,7 +179,7 @@ fn gender_form(s: &str, n: u128, gender: char, construct: bool, before_noun: boo
 static M_NOUNS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     set("ימים ימי שבועות שבועות חודשים חודשי לילות רגעים ילדים אנשים איש תלמידים סטודנטים עובדים חיילים
 שחקנים אורחים משתתפים נוסעים הרוגים פצועים תושבים מורים רופאים בנים אחים חברים נכדים גברים זוגות מתנדבים לקוחות
-מנהלים שוטרים קורבנות שקלים שקל דולרים דולר אירו יורו אחוז אחוזים קילו קילוגרם קילוגרמים גרם גרמים מטר מטרים
+מנהלים שוטרים קורבנות שקלים שקל דולרים דולר אירו יורו אחוז אחוזים קילו קילוגרם קילוגרמים גרם גרמים מטר מטרים הקטאר
 קילומטר קילומטרים סנטימטר סנטימטרים מילימטר ליטר ליטרים טון דונם ספרים בתים חדרים מקומות שולחנות כיסאות חלונות
 קולות דורות כוחות רחובות מכתבים טלפונים מחשבים אוטובוסים רכבים מטוסים שירים סרטים פרקים עמודים דפים שלבים צעדים
 סעיפים פריטים מוצרים מקרים ניסיונות פתרונות רעיונות יתרונות חשבונות שמות חלומות משחקים שערים פרסים עצים פרחים
@@ -267,6 +275,234 @@ fn he_abbrev(t: String, c: &mut Ctx) -> String {
             Some(format!("{}{}", g(m, 1), lookup(ABBREV, &key)?))
         },
     )
+}
+
+// ------------------------------------------------------------------------------------------------- money
+
+/// A currency after the amount; the grammar reads $ € ₪ before an amount and in a range ($5-10, €5-10, ₪5-10), £
+/// only for whole amounts.
+const HE_CUR_AFTER: &str = "(?:[$€₪£]|ש[\"״]ח|USD|EUR|ILS|GBP)";
+const HE_CUR_DEC: &str = "(?:[$€₪]|ש[\"״]ח|USD|EUR|ILS)";
+const HE_AMT: &str = r"\d{1,3}(?:,\d{3})+|\d+";
+/// A scale word after an amount: the decimal is not cents ($2.5M, 2.5 מיליון דולר).
+const HE_SCALE_AFTER: &str = r"(?:[A-Za-z]| ?(?:אלף|מיליון|מיליארד|טריליון|million|billion|trillion)(?!\w))";
+
+/// The sign for a currency written after the amount (ש״ח is the shekel, USD the dollar …).
+fn he_sign(cur: &str) -> &str {
+    match cur {
+        _ if cur.starts_with('ש') => "₪",
+        "USD" => "$",
+        "EUR" => "€",
+        "ILS" => "₪",
+        "GBP" => "£",
+        _ => cur,
+    }
+}
+
+fn he_money_minus(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(r"(?<![\w.,-])([$€₪£])-(?=\d)"), &t, r"-\1")
+}
+
+fn he_spaced_groups(t: String, c: &mut Ctx) -> String {
+    let p = format!(
+        r"(?<![\w.,:/{QUOTES}−+]){PRE}(-?(?:[$€₪£] ?)?)([1-9]\d{{0,2}}(?:[ \u00a0\u202f]\d{{3}})+)(?![\d]|[.,]\d|[ \u00a0\u202f]\d)"
+    );
+    c.sub(&rx(&p), &t, |m| {
+        let groups: Vec<&str> = g(m, 3).split([' ', '\u{a0}', '\u{202f}']).collect();
+        let money = super::super::search(r"[$€₪£]", g(m, 2))
+            || super::super::search(&format!(r"^(?: ?{HE_CUR_AFTER}(?!\w))"), &t[end(m)..]);
+        if !money && (groups.len() == 2 || (groups.len() == 3 && !groups[1..].contains(&"000"))) {
+            return None;
+        }
+        Some(format!("{}{}{}", g(m, 1), g(m, 2), groups.join(",")))
+    })
+}
+
+/// ISO codes the grammar leaves as letters: NIS (the shekel, as ₪) and the neighbours' JOD and EGP: (code, one, many).
+const HE_CODES: &[(&str, &str, &str)] =
+    &[("JOD", "דינר ירדני אחד", "דינרים ירדניים"), ("EGP", "לירה מצרית אחת", "לירות מצריות")];
+
+fn he_money_code(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(r"(?<![\w.,])NIS ?(?=\d)"), &t, "₪");
+    let t = c.sub_tpl(&rx(r"(?<![\w.,])(\d+(?:[.,]\d+)*) ?NIS(?!\w)"), &t, r"\1 ₪");
+    let code = |n: &str, cd: &str| {
+        let &(_, one, many) = HE_CODES.iter().find(|x| x.0 == cd)?;
+        Some(if n == "1" { one.to_string() } else { format!("{n} {many}") })
+    };
+    let codes = format!("({})", HE_CODES.iter().map(|x| x.0).collect::<Vec<_>>().join("|"));
+    let t = c.sub(&rx(&format!(r"(?<![\w.,]){codes} ?({HE_AMT})(?![\w]|[.,]\d)")), &t, |m| code(g(m, 2), g(m, 1)));
+    c.sub(&rx(&format!(r"{}({HE_AMT}) ?{codes}(?!\w)", num_before())), &t, |m| code(g(m, 1), g(m, 2)))
+}
+
+/// One decimal is tens of cents: 2.5 → 2.50.
+fn he_cents(amount: &str) -> String {
+    match amount.split_once('.') {
+        Some((whole, frac)) if frac.chars().count() == 1 => format!("{whole}.{frac}0"),
+        _ => amount.to_string(),
+    }
+}
+
+/// £2.50 as the grammar's dollar reading with the pound's words (שני פאונד וחמישים פני); None when the grammar does
+/// not read it.
+fn he_pound(amount: &str) -> Option<String> {
+    let said = words(&format!("${}", he_cents(amount)), "he");
+    if super::super::search(r"[0-9$]", &said) {
+        return None;
+    }
+    let toks: Vec<&str> = said
+        .split(' ')
+        .map(|w| match w {
+            "דולר" | "דולרים" => "פאונד",
+            "סנט" | "סנטים" => "פני",
+            "וסנט" | "וסנטים" => "ופני",
+            _ => w,
+        })
+        .collect();
+    Some(toks.join(" "))
+}
+
+fn amount_value(s: &str) -> f64 {
+    // Python's float() reads any decimal digits (٥ is 5)
+    let ascii: String = s
+        .chars()
+        .filter(|&ch| ch != ',')
+        .map(|ch| {
+            if crate::text::is_py_digit(ch) && !ch.is_ascii_digit() {
+                char::from_digit((ch as u32 - crate::text::nd_range_start(ch).unwrap_or(ch as u32)) % 10, 10)
+                    .unwrap_or('0')
+            } else {
+                ch
+            }
+        })
+        .collect();
+    ascii.parse().unwrap_or(0.0)
+}
+
+/// dash: the grammar's own form {sign}A-B is the rewrite (else the range is already read as typed).
+fn range_say(t: &str, end: usize, pre: &str, sign: &str, a: &str, b: &str, dash: bool) -> Option<String> {
+    if amount_value(a) >= amount_value(b) || t[end..].split('\n').next().unwrap_or("").contains('=') {
+        return None;
+    }
+    if sign == "£" || a.contains('.') || b.contains('.') {
+        return Some(format!("{pre}{sign}{} עד {sign}{}", he_cents(a), he_cents(b)));
+    }
+    dash.then(|| format!("{pre}{sign}{a}-{b}"))
+}
+
+fn he_money_range(t: String, c: &mut Ctx) -> String {
+    let nb = num_before();
+    let p = format!(
+        r"{nb}{PRE}([$€₪£])({HE_AMT}(?:\.\d{{1,2}})?)( ?[-–~] ?)([$€₪£])?({HE_AMT}(?:\.\d{{1,2}})?)(?!\d|[.,]\d| ?[-–~] ?\d|{HE_SCALE_AFTER})"
+    );
+    let t = c.sub(&rx(&p), &t, |m| {
+        let (pre, sign, a, sep, sign2, b) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5), g(m, 6));
+        if !sign2.is_empty() && sign2 != sign {
+            return None;
+        }
+        range_say(&t, end(m), pre, sign, a, b, sep.trim() == "~")
+    });
+    let p =
+        format!(r"{nb}{PRE}({HE_AMT}(?:\.\d{{1,2}})?)( ?[-–~] ?)({HE_AMT}(?:\.\d{{1,2}})?) ?({HE_CUR_AFTER})(?!\w)");
+    c.sub(&rx(&p), &t, |m| range_say(&t, end(m), g(m, 1), he_sign(g(m, 5)), g(m, 2), g(m, 4), true))
+}
+
+fn he_money_decimal(t: String, c: &mut Ctx) -> String {
+    let nb = num_before();
+    let t = c.sub(&rx(&format!(r"{nb}{PRE}(-?)([$€₪])({HE_AMT})\.(\d)(?!\d|[.,]\d|{HE_SCALE_AFTER})")), &t, |m| {
+        Some(format!("{}{}{}{}.{}0", g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5)))
+    });
+    let t = c.sub(&rx(&format!(r"{nb}{PRE}(-?)({HE_AMT})\.(\d)( ?)({HE_CUR_DEC})(?!\w)")), &t, |m| {
+        Some(format!("{}{}{}.{}0{}{}", g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5), g(m, 6)))
+    });
+    let t = c.sub(&rx(&format!(r"{nb}{PRE}£({HE_AMT}\.\d{{1,2}})(?!\d|[.,]\d|{HE_SCALE_AFTER})")), &t, |m| {
+        Some(format!("{}{}", g(m, 1), he_pound(g(m, 2))?))
+    });
+    c.sub(&rx(&format!(r"{nb}{PRE}({HE_AMT}\.\d{{1,2}}) ?(?:£|GBP)(?!\w)")), &t, |m| {
+        Some(format!("{}{}", g(m, 1), he_pound(g(m, 2))?))
+    })
+}
+
+/// A unit after a price and a slash: ₪/ק״ג → לקילוגרם (as the grammar reads €/kg); any other Hebrew word w → ל + w
+/// (לחודש, לשעה, ללילה).
+const HE_PER: &[(&str, &str)] = &[
+    ("ק\"ג", "קילוגרם"),
+    ("ק״ג", "קילוגרם"),
+    ("ק\"מ", "קילומטר"),
+    ("ק״מ", "קילומטר"),
+    ("מ\"ר", "מטר רבוע"),
+    ("מ״ר", "מטר רבוע"),
+    ("kg", "קילוגרם"),
+    ("km", "קילומטר"),
+    ("l", "ליטר"),
+    ("h", "שעה"),
+];
+
+fn he_money_per(t: String, c: &mut Ctx) -> String {
+    let mut keys: Vec<&str> = HE_PER.iter().map(|x| x.0).collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(n_chars(k)));
+    let keys = keys.join("|");
+    let p = format!(
+        r"(?<![\w.,])((?:[$€£₪](?:{HE_AMT})(?:\.\d+)?|(?:{HE_AMT})(?:\.\d+)? ?{HE_CUR_AFTER}))/({keys}|[א-ת]+)(?![\w{QUOTES}])"
+    );
+    c.sub(&rx(&p), &t, |m| {
+        let said = words(&m[0], "he");
+        if !said.contains('/') && !super::super::search(r"[0-9$€£₪]", &said) {
+            return None; // the grammar reads it (€20/kg → עשרים אירו לקילוגרם)
+        }
+        let unit = g(m, 2);
+        Some(format!("{} ל{}", g(m, 1), lookup(HE_PER, unit).unwrap_or(unit)))
+    })
+}
+
+/// 10^12 … 10^15 - 1 in the grammar's style (it reads only up to the billions): שני טריליון, טריליון וחמש, מאה
+/// ועשרים ושלושה טריליון ארבע מאות …; None when the grammar does not give the pieces.
+fn trillion_words(n: u128) -> Option<String> {
+    let (a, rest) = (n / 1_000_000_000_000, n % 1_000_000_000_000);
+    let head = words(&(a * 1_000_000_000).to_string(), "he");
+    if !(1..=999).contains(&a) || !head.ends_with("מיליארד") {
+        return None;
+    }
+    let mut out = format!("{}טריליון", &head[..head.len() - "מיליארד".len()]);
+    if rest >= 1_000_000_000 {
+        out = format!("{out} {}", words(&rest.to_string(), "he"));
+    } else if rest > 0 {
+        let tail = words(&(1_000_000_000 + rest).to_string(), "he");
+        out = format!("{out} {}", tail.strip_prefix("מיליארד ")?);
+    }
+    if super::super::search(r"\d", &out) { None } else { Some(out) }
+}
+
+fn he_big(t: String, c: &mut Ctx) -> String {
+    let p = format!(
+        r"{}{PRE}(-?)([$€£₪])?(\d{{1,3}}(?:,\d{{3}}){{4}})(?!\d|[.,]\d)( ?{HE_CUR_AFTER}(?!\w))?",
+        num_before()
+    );
+    c.sub(&rx(&p), &t, |m| {
+        let (pre, minus, sign, n, cur) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4), g(m, 5).trim());
+        let mut said = trillion_words(py_int(&n.replace(',', "")))?;
+        let sign = if !sign.is_empty() {
+            sign
+        } else if !cur.is_empty() {
+            he_sign(cur)
+        } else {
+            ""
+        };
+        if !sign.is_empty() {
+            let unit = words(&format!("{sign}2,000,000,000"), "he");
+            said = format!("{said} {}", unit.strip_prefix("שני מיליארד ")?);
+        }
+        Some(format!("{pre}{}{}", if minus.is_empty() { "" } else { "מינוס " }, std_(&said)))
+    })
+}
+
+fn he_hectare(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"{}{PRE}(\d+(?:[.,]\d+)?) ?ha(?![\w])", num_before())), &t, |m| {
+        Some(if g(m, 2) == "1" {
+            format!("{}הקטאר אחד", g(m, 1))
+        } else {
+            format!("{}{} הקטאר", g(m, 1), g(m, 2))
+        })
+    })
 }
 
 const LETTER_NAMES: &[(char, &str)] = &[

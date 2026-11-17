@@ -17,7 +17,11 @@ use crate::text::{py_capitalize, py_split_ws, py_strip};
 
 pub(super) const RULES: &[LangRule] = &[
     ("cs.minus", cs_minus),
+    ("cs.money-range", cs_money_range),
     ("cs.scale", cs_scale),
+    ("cs.money-decimal", cs_money_decimal),
+    ("cs.per-unit", cs_per_unit),
+    ("cs.hectare", cs_hectare),
     ("cs.time", cs_time),
     ("cs.hours", cs_hours),
     ("cs.date", cs_date),
@@ -29,6 +33,8 @@ pub(super) const RULES: &[LangRule] = &[
     ("cs.abbrev", cs_abbrev),
     ("cs.number-case", cs_number_case),
     ("cs.money", cs_money),
+    ("cs.money-words", cs_money_words),
+    ("cs.big-number", cs_big_number),
     ("cs.weekdays", cs_weekdays),
     ("cs.vocalize", cs_vocalize),
 ];
@@ -301,7 +307,7 @@ fn card(n: u128, case: &str, gender: &str) -> Option<String> {
     }
     let mut out: Vec<String> = Vec::new();
     let mut prev = "";
-    let spoken = words(&n.to_string(), "cs");
+    let spoken = if n >= 1000 { cs_number(n) } else { words(&n.to_string(), "cs") };
     for w in py_split_ws(&spoken) {
         let forms =
             if w == "tisíc" { Some(if prev.is_empty() { TISIC_SG } else { TISIC_PL }) } else { lookup(CARD, w) };
@@ -420,7 +426,7 @@ fn hours(n: &str, word: &str) -> String {
 }
 
 fn cs_minus(t: String, c: &mut Ctx) -> String {
-    c.sub_tpl(&rx(r"(?<![\w.,\-−+/])[-−](?=\d)"), &t, "minus ")
+    c.sub_tpl(&rx(r"(?<![\w.,\-−+/])[-−](?=[€$£¥]?\d)"), &t, "minus ")
 }
 
 fn cs_scale(t: String, c: &mut Ctx) -> String {
@@ -983,7 +989,11 @@ fn cs_money(t: String, c: &mut Ctx) -> String {
         if n <= 20 || !(2..=4).contains(&d) || (12..=14).contains(&(n % 100)) {
             return None;
         }
-        Some(format!("{} {}", words(&(n - d).to_string(), "cs"), words(&format!("{d} {cur}"), "cs")))
+        let head = if n - d >= 1000 { cs_number(n - d) } else { words(&(n - d).to_string(), "cs") };
+        if search(r"\d", &head) {
+            return None;
+        }
+        Some(format!("{head} {}", words(&format!("{d} {cur}"), "cs")))
     })
 }
 
@@ -1019,4 +1029,356 @@ fn cs_vocalize(t: String, c: &mut Ctx) -> String {
     let t = c.sub_tpl(&rx(&format!(r"(?<![\w.])([Vv]) (?={cluster}\b)")), &t, r"\1e ");
     let t = c.sub_tpl(&rx(&format!(r"(?<![\w.])([SsZz]) (?=(?:{cluster}|{sib})\b)")), &t, r"\1e ");
     c.sub_tpl(&rx(&format!(r"(?<![\w.])([Kk]) (?={cluster}\b)")), &t, r"\1e ")
+}
+
+// ============================================================================== money and big numbers (Nov 16 b)
+
+/// Currencies the grammar reads with haléře/centy after a two-decimal amount.
+const CENT_CUR: &str = r"Kč|CZK|€|EUR|\$|USD";
+/// Currencies the grammar reads after a whole amount but not after a decimal one.
+const MAIN_CUR: &str = r"£|GBP|CHF|UAH|₴|RUB|₽|руб\.|TRY|₺";
+const MONEY_SIGN: &str = r"[€$£¥₽₴₺]";
+const GROUPED: &str = r"\d{1,3}(?:[ \xa0]\d{3})+|\d+";
+
+fn cs_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(
+        &rx(&format!(r"(?<=\d)((?:[ \xa0]?(?:{CENT_CUR}|{MAIN_CUR}))?) ?~ ?(?={MONEY_SIGN}?\d)")),
+        &t,
+        r"\1-",
+    );
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN})(\d+(?:,\d{{1,2}})?)[-–](\d+(?:,\d{{1,2}})?)(?![\d,.]?\d|[ \xa0]?(?:tis|mil|mld|{CENT_CUR}|{MAIN_CUR})(?!\w)|[ \xa0]\d)"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 2), g(m, 3), g(m, 1))),
+    );
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])(\d+(?:,\d{{1,2}})?)[ \xa0]?({CENT_CUR}|{MAIN_CUR})[-–](\d+(?:,\d{{1,2}})?)[ \xa0]?\2(?!\w)"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 1), g(m, 3), g(m, 2))),
+    )
+}
+
+/// The digits of `s` as a number (`int(re.sub(r"\D", "", s))`).
+fn digits_int(s: &str) -> u128 {
+    py_int(&s.chars().filter(char::is_ascii_digit).collect::<String>())
+}
+
+/// 12345678 -> "12 345 678".
+fn group3(n: u128) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// `frac.ljust(2, "0")` as a number.
+fn cents_of(frac: &str) -> u128 {
+    py_int(&format!("{frac:0<2}"))
+}
+
+fn cs_money_main(m: &Captures<'_, str>) -> Option<String> {
+    let (sign, num, frac) = (g(m, 1), g(m, 2), g(m, 3));
+    let cur = if g(m, 4).is_empty() { sign } else { g(m, 4) };
+    let n = digits_int(num);
+    let out = words(&format!("{} {cur}", group3(n)), "cs");
+    if search(r"\d", &out) || out.ends_with(cur) {
+        return None;
+    }
+    let cents = cents_of(frac);
+    Some(if cents > 0 { format!("{out} {}", words(&cents.to_string(), "cs")) } else { out })
+}
+
+fn cs_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({GROUPED}),(\d)(?=[ \xa0]?(?:{CENT_CUR})(?!\w))")), &t, |m| {
+        Some(format!("{},{}0", g(m, 1), g(m, 2)))
+    });
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w.,])([€$])({GROUPED}),(\d)(?![\d\w]|,\d|[ \xa0]?(?:tis|mil|mld)(?!\w))")),
+        &t,
+        |m| Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3))),
+    );
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])()({GROUPED}),(\d{{1,2}})[ \xa0]?({MAIN_CUR})(?!\w)")), &t, cs_money_main);
+    c.sub(
+        &rx(&format!(r"(?<![\w.,])(£|₴|₽|₺)({GROUPED}),(\d{{1,2}})()(?![\d\w]|,\d|[ \xa0]?(?:tis|mil|mld)(?!\w))")),
+        &t,
+        cs_money_main,
+    )
+}
+
+/// Scale words: (div, the word for 1, the form after 2-4, the form after 5+, gender).
+const CS_SCALES: &[(u128, &str, &str, &str, &str)] = &[
+    (1_000_000_000_000, "jeden bilion", "biliony", "bilionů", "m"),
+    (1_000_000_000, "jedna miliarda", "miliardy", "miliard", "f"),
+    (1_000_000, "jeden milion", "miliony", "milionů", "m"),
+    (1_000, "tisíc", "tisíce", "tisíc", "m"),
+];
+
+/// The cardinal n (up to 999 999 999 999 999) in the grammar's style, without its slips.
+fn cs_number(n: u128) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for &(div, one, few, many, gender) in CS_SCALES {
+        let gv = n / div % 1000;
+        if gv == 0 {
+            continue;
+        }
+        if gv == 1 {
+            parts.push(one.to_string());
+            continue;
+        }
+        let mut w = words(&gv.to_string(), "cs");
+        if (2..=4).contains(&(gv % 100)) {
+            if gender == "f" && py_split_ws(&w).last() == Some(&"dva") {
+                w = format!("{}dvě", &w[..w.len() - 3]);
+            }
+            parts.push(format!("{w} {few}"));
+        } else {
+            parts.push(format!("{w} {many}"));
+        }
+    }
+    if n % 1000 > 0 {
+        parts.push(words(&(n % 1000).to_string(), "cs"));
+    }
+    parts.join(" ")
+}
+
+fn cs_big_number(t: String, c: &mut Ctx) -> String {
+    c.sub(
+        &rx(r"(?<![\w.,:/+\-−])(\d{1,3}(?:[ \xa0]\d{3}){1,4}|[1-9]\d{0,2}0{12})(,\d{2})?(?![\d]|[.,:/]\d|[ \xa0]\d)(?:[ \xa0]?(Kč|CZK|€|EUR|\$|USD|£|GBP|CHF|km|kg|m|t|l|g)(?!\w))?"),
+        &t,
+        |m| {
+            let (num, cents, tok) = (g(m, 1), g(m, 2), g(m, 3));
+            let n = digits_int(num);
+            if !(1000..1_000_000_000_000_000).contains(&n) {
+                return None;
+            }
+            if !cents.is_empty() && !full(CENT_CUR, tok) {
+                return None;
+            }
+            let mut plain = format!("{}{cents}", group3(n));
+            let mut mine = cs_number(n);
+            if !tok.is_empty() {
+                let genw = unit_gen(tok)?;
+                if n % 1000 > 0 {
+                    let head = cs_number(n - n % 1000);
+                    let tail = words(&format!("{}{cents} {tok}", n % 1000), "cs");
+                    mine = if head.is_empty() { tail } else { format!("{head} {tail}") };
+                } else {
+                    mine = format!("{mine} {genw}");
+                    if !cents.is_empty() {
+                        mine = format!("{mine} {}", words(&format!("0{cents} {tok}"), "cs"));
+                    }
+                }
+                plain = format!("{plain} {tok}");
+            }
+            if search(r"\d", &mine) || words(&plain, "cs") == mine {
+                return None;
+            }
+            Some(mine)
+        },
+    )
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("měsíc", "měsíčně"),
+    ("měs.", "měsíčně"),
+    ("měs", "měsíčně"),
+    ("den", "denně"),
+    ("rok", "ročně"),
+    ("týden", "týdně"),
+    ("týd.", "týdně"),
+    ("hod.", "za hodinu"),
+    ("hod", "za hodinu"),
+    ("h", "za hodinu"),
+    ("ks", "za kus"),
+    ("os.", "za osobu"),
+    ("osobu", "za osobu"),
+    ("noc", "za noc"),
+    ("m²", "za metr čtvereční"),
+    ("m2", "za metr čtvereční"),
+    ("m³", "za metr krychlový"),
+    ("m3", "za metr krychlový"),
+    ("kWh", "za kilowatthodinu"),
+    ("kg", "za kilogram"),
+    ("km", "za kilometr"),
+    ("ha", "za hektar"),
+    ("min", "za minutu"),
+    ("l", "za litr"),
+    ("t", "za tunu"),
+    ("g", "za gram"),
+    ("m", "za metr"),
+];
+
+/// `|`-joined escaped keys, longest first (ties in table order).
+fn alternation(keys: &[&str]) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|")
+}
+
+fn cs_per_unit(t: String, c: &mut Ctx) -> String {
+    let dens = alternation(&PER_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>());
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN})({GROUPED}(?:,\d{{1,2}})?)/(?=\w)")), &t, |m| {
+        Some(format!("{} {}/", g(m, 2), g(m, 1)))
+    });
+    let s: &str = &t;
+    c.sub(
+        &rx(&format!(
+            r"(?<=\d)([ \xa0]?(?:{CENT_CUR}|{MAIN_CUR}|PLN|zł|HUF|Ft|SEK|NOK|DKK|JPY|¥|CNY))/({dens})(?![\w²³])"
+        )),
+        &t,
+        |m| {
+            let den = g(m, 2);
+            let dot = if den.ends_with('.') { end_dot(s, end(m)) } else { "" };
+            Some(format!("{} {}{dot}", g(m, 1), lookup(PER_UNIT, den)?))
+        },
+    )
+}
+
+fn cs_hectare(t: String, c: &mut Ctx) -> String {
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"(?<![\w.,])({GROUPED})(,\d+)?[ \xa0]?(ha|km²)(?![\w²])")), &t, |m| {
+        let (num, frac, unit) = (g(m, 1), g(m, 2), g(m, 3));
+        let n = digits_int(num);
+        if unit != "ha" {
+            // km²: the number is written too (cs.number-case would take čtverečních for a locative)
+            if !frac.is_empty() {
+                return Some(format!("{num}{frac} čtverečního kilometru"));
+            }
+            let p = prep_before(s, start(m));
+            if GEN_PREPS.contains(&p.as_str()) {
+                let w = card(n, "gen", "m")?;
+                return Some(format!("{w} {}", if n == 1 { "čtverečního kilometru" } else { "čtverečních kilometrů" }));
+            }
+            if DAT_PREPS.contains(&p.as_str()) || LOC_PREPS.contains(&p.as_str()) || INS_PREPS.contains(&p.as_str()) {
+                return None;
+            }
+            let forms = ["čtvereční kilometr", "čtvereční kilometry", "čtverečních kilometrů"];
+            let f = if n == 1 {
+                0
+            } else if (2..=4).contains(&(n % 100)) {
+                1
+            } else {
+                2
+            };
+            let out = format!("{} {}", cs_nominative(n, "m"), forms[f]);
+            return if search(r"\d", &out) { None } else { Some(out) };
+        }
+        if !frac.is_empty() {
+            return Some(format!("{num}{frac} hektaru"));
+        }
+        if n == 1 {
+            return Some("jeden hektar".to_string());
+        }
+        Some(format!("{num} {}", if (2..=4).contains(&(n % 100)) { "hektary" } else { "hektarů" }))
+    })
+}
+
+/// Currencies the grammar leaves unread: forms after 1, after 2-4, after 5+, gender, genitive singular.
+const OTHER_CUR: &[(&str, [&str; 5])] = &[
+    ("PLN", ["zlotý", "zloté", "zlotých", "m", "zlotého"]),
+    ("zł", ["zlotý", "zloté", "zlotých", "m", "zlotého"]),
+    ("HUF", ["forint", "forinty", "forintů", "m", "forintu"]),
+    ("Ft", ["forint", "forinty", "forintů", "m", "forintu"]),
+    ("SEK", ["švédská koruna", "švédské koruny", "švédských korun", "f", "švédské koruny"]),
+    ("NOK", ["norská koruna", "norské koruny", "norských korun", "f", "norské koruny"]),
+    ("DKK", ["dánská koruna", "dánské koruny", "dánských korun", "f", "dánské koruny"]),
+    ("JPY", ["jen", "jeny", "jenů", "m", "jenu"]),
+    ("¥", ["jen", "jeny", "jenů", "m", "jenu"]),
+    ("CNY", ["jüan", "jüany", "jüanů", "m", "jüanu"]),
+];
+
+/// 0 after 1, 1 after 2-4 (and 22-24 …, not 12-14), 2 otherwise (genitive plural).
+fn plural_form(n: u128) -> usize {
+    if n == 1 {
+        0
+    } else if matches!(n % 10, 2..=4) && !matches!(n % 100, 12..=14) {
+        1
+    } else {
+        2
+    }
+}
+
+/// n in the nominative before a currency of `gender` (jeden/jedna, dva/dvě).
+fn cs_nominative(n: u128, gender: &str) -> String {
+    if n == 1 {
+        return (if gender == "f" { "jedna" } else { "jeden" }).to_string();
+    }
+    let mut w = if n >= 1000 { cs_number(n) } else { words(&n.to_string(), "cs") };
+    if gender == "f" && py_split_ws(&w).last() == Some(&"dva") && plural_form(n) == 1 {
+        w = format!("{}dvě", &w[..w.len() - 3]);
+    }
+    w
+}
+
+fn cs_money_words(t: String, c: &mut Ctx) -> String {
+    let codes = alternation(&OTHER_CUR.iter().map(|kv| kv.0).collect::<Vec<_>>());
+    let s: &str = &t;
+    let t2 = c.sub(
+        &rx(&format!(r"(?<![\w.,\-–])(?:(\d+)[-–](?=\d))?({GROUPED})(?:,(\d{{1,2}}))?[ \xa0]?({codes})(?!\w)")),
+        &t,
+        |m| {
+            let (num, code) = (g(m, 2), g(m, 4));
+            let [sg, few, many, gender, gen_sg] = OTHER_CUR.iter().find(|kv| kv.0 == code)?.1;
+            let n = digits_int(num);
+            let p = prep_before(s, start(m));
+            let oblique = GEN_PREPS.contains(&p.as_str())
+                || DAT_PREPS.contains(&p.as_str())
+                || LOC_PREPS.contains(&p.as_str())
+                || INS_PREPS.contains(&p.as_str());
+            if let Some(a) = m.get(1) {
+                // a range: N až M and the noun agreeing with M (pět až deset zlotých)
+                if m.get(3).is_some() || py_int(a.as_str()) >= n || oblique {
+                    return None;
+                }
+                let out = format!(
+                    "{} až {} {}",
+                    cs_nominative(py_int(a.as_str()), gender),
+                    cs_nominative(n, gender),
+                    [sg, few, many][plural_form(n)]
+                );
+                return if search(r"\d", &out) { None } else { Some(out) };
+            }
+            if GEN_PREPS.contains(&p.as_str()) && m.get(3).is_none() {
+                let w = card(n, "gen", gender)?;
+                return Some(format!("{w} {}", if n == 1 { gen_sg } else { many }));
+            }
+            if oblique {
+                return None;
+            }
+            let mut out = format!("{} {}", cs_nominative(n, gender), [sg, few, many][plural_form(n)]);
+            if let Some(frac) = m.get(3) {
+                let cents = cents_of(frac.as_str());
+                if cents > 0 {
+                    out = format!("{out} {}", words(&cents.to_string(), "cs"));
+                }
+            }
+            if search(r"\d", &out) { None } else { Some(out) }
+        },
+    );
+    // after a number cs.number-case wrote in the genitive (od 5 PLN → od pěti PLN): the genitive of the currency
+    let mut gen_words: Vec<&str> = CARD.iter().map(|kv| kv.1.split_whitespace().next().unwrap_or("")).collect();
+    gen_words.extend(["jednoho", "jedné", "tisíce", "tisíc"]);
+    gen_words.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then(a.cmp(b)));
+    gen_words.dedup();
+    let alt = gen_words.join("|");
+    let s2: &str = &t2;
+    c.sub(&rx(&format!(r"(?<!\w)({alt}) ({codes})(?!\w)")), &t2, |m| {
+        let head = sub_plain(&rx(&format!(r"(?:(?<!\w)(?:{alt}) )+$")), &s2[..start(m)], |_| Some(String::new()));
+        if !GEN_PREPS.contains(&prep_before(&head, head.len()).as_str()) {
+            return None;
+        }
+        let forms = OTHER_CUR.iter().find(|kv| kv.0 == g(m, 2))?.1;
+        let w = g(m, 1);
+        Some(format!("{w} {}", if w == "jednoho" || w == "jedné" { forms[4] } else { forms[2] }))
+    })
 }

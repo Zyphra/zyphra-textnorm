@@ -13,6 +13,9 @@ use super::super::{Ctx, full, g, matches_at_start, py_int, py_rstrip, rx, search
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("tl.groups", tl_groups),
+    ("tl.money", tl_money),
+    ("tl.per", tl_per),
     ("tl.date-day", tl_date_day),
     ("tl.time", tl_time),
     ("tl.ng", tl_ng),
@@ -63,6 +66,77 @@ fn sentence_initial(head: &str) -> bool {
         None => true,
         Some(ch) => ".!?:;…\"“”(«»–—-*•".contains(ch),
     }
+}
+
+// ------------------------------------------------------------------------------------------------- money (Nov 16)
+
+/// A currency sign or code the grammar reads.
+const TL_SIGN: &str = r"(?:[₱$€£¥]|(?<![A-Za-z])(?:PHP|USD|EUR|GBP|JPY) ?)";
+/// Neighbours' codes the grammar leaves unread.
+const TL_CODES: &[(&str, &str)] = &[("IDR", "rupiah"), ("BND", "dolyar ng Brunei")];
+const TL_CUR_AFTER: &str = r"(?:[₱$€£¥]|PHP|USD|EUR|GBP|JPY)(?![A-Za-z])";
+
+fn tl_groups(t: String, c: &mut Ctx) -> String {
+    let pat = concat!(
+        r"(?<![\w.,/:+\-–])(?<!\d[ \x{A0}\x{202F}])[1-9]\d{0,2}(?:[ \x{A0}\x{202F}]\d{3})+(?!\d|[.,]\d{3})",
+        r"(?![ \x{A0}\x{202F}]\d)"
+    );
+    c.sub(&rx(pat), &t, |m| {
+        let w = m.get(0).expect("group 0");
+        let gaps = w.as_str().chars().filter(|&ch| matches!(ch, ' ' | '\u{a0}' | '\u{202f}')).count();
+        if gaps < 2
+            && !super::super::search(r"[$€£¥₩₱฿₫₹] ?$", &t[..w.start()])
+            && !matches_at_start(r"[ \x{A0}\x{202F}]?(?:[₱$€£¥]|[^\W\d_])", &t[w.end()..])
+        {
+            return None;
+        }
+        Some(w.as_str().chars().map(|ch| if matches!(ch, ' ' | '\u{a0}' | '\u{202f}') { ',' } else { ch }).collect())
+    })
+}
+
+fn tl_money(t: String, c: &mut Ctx) -> String {
+    let scale = r"(?![A-Za-z]| (?:libo|milyon|bilyon|trilyon|M|K|B)(?!\w))";
+    let pat = format!(r"(?<![\w.,])({TL_SIGN}\d{{1,3}}(?:,\d{{3}})+|{TL_SIGN}\d+)\.(\d)(?![\d.,]\d|\d){scale}");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}.{}0", g(m, 1), g(m, 2))));
+    let pat = format!(
+        r"(?<![\w.,])(?<!\d[\-–—~～〜])(?<!\d [\-–—~～〜])(\d{{1,3}}(?:,\d{{3}})+|\d+)\.(\d)( ?{TL_CUR_AFTER})"
+    );
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}.{}0{}", g(m, 1), g(m, 2), g(m, 3))));
+    let pat = format!(r"(?<![\w.,])({TL_SIGN}?\d[\d,]*(?:\.\d+)?) ?[~～〜] ?(?={TL_SIGN}?\d)");
+    let t = c.sub(&rx(&pat), &t, |m| Some(format!("{}-", g(m, 1))));
+    let pat = concat!(
+        r"(?<![\w.,])(?:(IDR|BND) ?(\d{1,3}(?:,\d{3})+|\d+)(?![\d.,]\d|\d)|(\d{1,3}(?:,\d{3})+|\d+) ?(IDR|BND))",
+        r"(?![A-Za-z])"
+    );
+    c.sub(&rx(pat), &t, |m| {
+        let code = if g(m, 1).is_empty() { g(m, 4) } else { g(m, 1) };
+        let word = TL_CODES.iter().find(|(k, _)| *k == code).map(|(_, v)| *v)?;
+        Some(format!("{} {word}", if g(m, 2).is_empty() { g(m, 3) } else { g(m, 2) }))
+    })
+}
+
+const TL_PER_UNITS: &[(&str, &str)] = &[
+    ("m²", "parisukat na metro"),
+    ("㎡", "parisukat na metro"),
+    ("km", "kilometro"),
+    ("kg", "kilo"),
+    ("m", "metro"),
+    ("L", "litro"),
+    ("g", "gramo"),
+];
+
+fn tl_per(t: String, c: &mut Ctx) -> String {
+    let money = format!(
+        r"(?<![\w.,])({TL_SIGN}\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)? ?(?:{TL_CUR_AFTER}|(?:piso|euro|dolyar|sentimo)(?!\w)))"
+    );
+    let pat = format!(r"{money} ?/ ?(m²|㎡|[^\W\d_]+)(?![\w²³])");
+    c.sub(&rx(&pat), &t, |m| {
+        if !words(&m[0], "tl").contains('/') {
+            return None; // the grammar reads it (₱100/buwan → isang daang piso bawat buwan)
+        }
+        let unit = TL_PER_UNITS.iter().find(|(k, _)| *k == g(m, 2)).map_or(g(m, 2), |(_, v)| *v);
+        Some(format!("{} bawat {unit}", g(m, 1)))
+    })
 }
 
 const MONTHS: [&str; 12] = [

@@ -10,20 +10,25 @@ use std::sync::LazyLock;
 use fancy_regex::Captures;
 
 #[allow(unused_imports)]
-use super::super::{Ctx, g, matches_at_start, py_int, rx, search, tpl};
+use super::super::{Ctx, full, g, matches_at_start, py_int, rx, search, tpl};
+use super::da::{money_range, per_unit};
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("fi.trillions", fi_trillions),
     ("fi.thousands", fi_thousands),
     ("fi.time-dot", fi_time_dot),
     ("fi.date", fi_date),
     ("fi.abbrev", fi_abbrev),
     ("fi.money", fi_money),
+    ("fi.money-range", fi_money_range),
+    ("fi.per-unit", fi_per_unit),
     ("fi.units", fi_units),
     ("fi.half", fi_half),
     ("fi.colon-suffix", fi_colon_suffix),
     ("fi.case", fi_case),
+    ("fi.range", fi_range),
 ];
 
 const SP: &str = r"[ \t\x{A0}]";
@@ -573,5 +578,144 @@ fn fi_half(t: String, c: &mut Ctx) -> String {
             Some(n) => format!("{} ja puoli {unit}", words(n, "fi")),
         };
         if new == words(&m[0], "fi") { None } else { Some(new) }
+    })
+}
+
+const FI_CUR: &str = r"€|\$|£|¥|₽|kr";
+
+fn fi_money_range(t: String, c: &mut Ctx) -> String {
+    let t = money_range(t, c, FI_CUR);
+    let t = c.sub(&rx(r"(?<![\w.,])(\d+,\d{1,2}) ?[-–] ?(\d+(?:,\d{1,2})?) ?(€|\$|£)(?!\w)"), &t, |m| {
+        let a = words(&format!("{} {}", g(m, 1), g(m, 3)), "fi");
+        let b = words(&format!("{} {}", g(m, 2), g(m, 3)), "fi");
+        let out = format!("{a} – {b}");
+        if search(r"\d", &out) { None } else { Some(out) }
+    });
+    let p = format!(r"(?<![\w.,])({FI_CUR}) ?(\d+(?:,\d+)?) ?[-–] ?\1 ?(\d+(?:,\d+)?)(?![\w]|[.,]\d)");
+    let t = c.sub_tpl(&rx(&p), &t, r"\2-\3 \1");
+    let p = format!(r"(?<![\w.,])(\d+(?:,\d+)?) ?({FI_CUR}) ?[-–] ?(\d+(?:,\d+)?) ?\2(?!\w)");
+    c.sub_tpl(&rx(&p), &t, r"\1-\3 \2")
+}
+
+const FI_PER: &[(&str, &str)] = &[
+    ("vuosi", "vuodessa"),
+    ("pv", "päivässä"),
+    ("päivä", "päivässä"),
+    ("vko", "viikossa"),
+    ("vk", "viikossa"),
+    ("viikko", "viikossa"),
+    ("kuukausi", "kuukaudessa"),
+    ("vrk", "vuorokaudessa"),
+    ("vuorokausi", "vuorokaudessa"),
+    ("tunti", "tunnissa"),
+    ("g", "grammalta"),
+    ("l", "litralta"),
+    ("litra", "litralta"),
+    ("m²", "neliömetriltä"),
+    ("m2", "neliömetriltä"),
+    ("m³", "kuutiometriltä"),
+    ("ha", "hehtaarilta"),
+    ("kWh", "kilowattitunnilta"),
+    ("tonni", "tonnilta"),
+    ("henkilö", "henkilöltä"),
+    ("yö", "yöltä"),
+];
+
+fn fi_per_unit(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, FI_CUR, FI_PER)
+}
+
+static SCORE_CUE: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    set("voitti hävisi päättyi päätyi tulos tulokseen lukemin lukemat maalein erin pistein tasan ottelu ottelun peli \
+         pelin voittoon tappioon")
+});
+/// A bare range is read only after these (klo 10–12, noin 5–10); before these words N–M is not a quantity.
+static RANGE_CUE: LazyLock<HashSet<&str>> =
+    LazyLock::new(|| set("klo kello noin n. ikä iältään sivut sivuilla s. välillä"));
+static RANGE_STOP: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    set("ja tai sekä mutta kuin että jos kun niin ei eikä on ovat oli olivat olla vastaan jälkeen maalein erin lukemin")
+});
+
+fn fi_range(t: String, c: &mut Ctx) -> String {
+    let num = r"([1-9]\d{0,2}(?:[ \x{A0}]\d{3})?(?![\d])|[1-9]\d*)";
+    let p = [
+        r"(?<![\w.,:/+−–-])(?<!\d",
+        SP,
+        r")",
+        num,
+        r"( ?[-–] ?)",
+        num,
+        r"(?![\d]|[.,:]\d|[-–])((?:",
+        SP,
+        r"?(?:[%€$£]|[^\W\d_]+\.?))?)(?![\w-])",
+    ]
+    .concat();
+    c.sub(&rx(&p), &t, |m| {
+        let (a, b) = (py_int(g(m, 1)), py_int(g(m, 3)));
+        if !(0 < a && a < b && b < 1_000_000_000) {
+            return None;
+        }
+        if full(r"\d{4}", g(m, 1))
+            && full(r"\d{4}", g(m, 3))
+            && (1000..=2100).contains(&a)
+            && (1000..=2100).contains(&b)
+        {
+            return None; // two years
+        }
+        let head = &t[..m.get(0).expect("group 0").start()];
+        let cue = caps(&[r"(\S+)", SP, r"+$"].concat(), head).map(|p| g(&p, 1).to_lowercase()).unwrap_or_default();
+        if SCORE_CUE.contains(cue.trim_matches(',')) {
+            return None;
+        }
+        let tok = g(m, 4).trim_matches(|ch| matches!(ch, ' ' | '\t' | '\u{a0}')).trim_end_matches('.');
+        if (tok.is_empty() && !RANGE_CUE.contains(cue.as_str())) || RANGE_STOP.contains(tok) {
+            return None; // a bare N-M (a code, a score) or one before a conjunction or a verb
+        }
+        let w = words(g(m, 0), "fi");
+        let head = format!("{} viiva {}", words(&a.to_string(), "fi"), words(&b.to_string(), "fi"));
+        if !w.starts_with(&head) || search(r"\d", &w) {
+            return None;
+        }
+        Some(format!("{} {}{}", cardinal(a, "ela"), cardinal(b, "ill"), &w[head.len()..]))
+    })
+}
+
+const FI_BIG_CUR: &str = r"€|\$|£|euroa|dollaria";
+
+fn fi_trillions(t: String, c: &mut Ctx) -> String {
+    let p = [
+        r"(?<![\d.,:/+−-])(?<!\d",
+        SP,
+        r")(?:([1-9]\d{0,2}(?:[ \x{A0}\x{202F}]\d{3}){4})|([1-9]\d{12,14}))(?![\d]|[.,]\d|",
+        SP,
+        r"\d)(?:(",
+        SP,
+        r"?)(",
+        FI_BIG_CUR,
+        r")(?!\w))?",
+    ]
+    .concat();
+    c.sub(&rx(&p), &t, |m| {
+        let grouped = g(m, 1);
+        let n = py_int(if grouped.is_empty() { g(m, 2) } else { grouped });
+        let (sp, cur) = (g(m, 3), g(m, 4));
+        if grouped.is_empty() && cur.is_empty() {
+            return None;
+        }
+        let (tr, rest) = (n / 1_000_000_000_000, n % 1_000_000_000_000);
+        let mut out =
+            if tr == 1 { "biljoona".to_string() } else { format!("{} biljoonaa", words(&tr.to_string(), "fi")) };
+        if rest != 0 {
+            out = format!("{out} {}", words(&rest.to_string(), "fi"));
+        }
+        if !cur.is_empty() {
+            let two = words("2", "fi");
+            let w = words(&format!("2{sp}{cur}"), "fi");
+            if !w.starts_with(&format!("{two} ")) {
+                return None;
+            }
+            out.push_str(&w[two.len()..]);
+        }
+        if search(r"\d", &out) { None } else { Some(out) }
     })
 }

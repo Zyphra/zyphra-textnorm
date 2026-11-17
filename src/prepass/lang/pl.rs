@@ -17,6 +17,10 @@ use crate::text::{py_capitalize, py_split_ws, py_strip};
 
 pub(super) const RULES: &[LangRule] = &[
     ("pl.scale", pl_scale),
+    ("pl.money-range", pl_money_range),
+    ("pl.money-decimal", pl_money_decimal),
+    ("pl.trillion", pl_trillion),
+    ("pl.per-unit", pl_per_unit),
     ("pl.time", pl_time),
     ("pl.date", pl_date),
     ("pl.century", pl_century),
@@ -26,6 +30,7 @@ pub(super) const RULES: &[LangRule] = &[
     ("pl.half", pl_half),
     ("pl.abbrev", pl_abbrev),
     ("pl.number-case", pl_number_case),
+    ("pl.money-words", pl_money_words),
     ("pl.weekdays", pl_weekdays),
 ];
 
@@ -475,7 +480,7 @@ fn pl_scale(t: String, c: &mut Ctx) -> String {
             if n >= 1000 {
                 return None;
             }
-            return Some(format!("{n} {zeros}{}", end_dot(s, end(m))));
+            return Some(format!("{n} {zeros}{}", if g(m, 4).is_empty() { "" } else { end_dot(s, end(m)) }));
         }
         let (whole, frac) = num.split_once(',')?;
         let spoken = if frac == "5" {
@@ -500,7 +505,7 @@ fn pl_scale(t: String, c: &mut Ctx) -> String {
             let gw = unit_gen(cur)?;
             out = format!("{out} {gw}");
         }
-        Some(format!("{out}{}", end_dot(s, end(m))))
+        Some(format!("{out}{}", if g(m, 4).is_empty() { "" } else { end_dot(s, end(m)) }))
     });
     // the currency after a written-out decimal scale: dwa i pół miliona zł -> dwa i pół miliona złotych
     c.sub(&rx(r"\b((?:tysiąca|miliona|miliarda|biliona)) (zł|PLN|€|EUR|USD|\$|GBP|£|CHF)(?!\w)"), &t2, |m| {
@@ -1135,4 +1140,246 @@ fn pl_abbrev(t: String, c: &mut Ctx) -> String {
             Some(format!("{out}{dot}"))
         },
     )
+}
+
+// ============================================================================== money and big numbers (Nov 16 b)
+
+/// Currencies the grammar reads after an amount (with grosze/centy for two decimals).
+const MONEY_CUR: &str = r"zł|PLN|€|EUR|\$|USD|£|GBP|CHF|Kč|CZK|₴|UAH|₽|RUB|₺|TRY|¥|JPY";
+const MONEY_SIGN: &str = r"[€$£¥₽₴₺]";
+const GROUPED: &str = r"\d{1,3}(?:[ \xa0]\d{3})+|\d+";
+
+fn pl_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub_tpl(&rx(&format!(r"(?<=\d)((?:[ \xa0]?(?:{MONEY_CUR}))?) ?~ ?(?={MONEY_SIGN}?\d)")), &t, r"\1-");
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN})(\d+(?:,\d{{1,2}})?)[-–](\d+(?:,\d{{1,2}})?)(?![\d,.]?\d|[ \xa0]?(?:tys|mln|mld|bln|{MONEY_CUR})(?!\w)|[ \xa0]\d)"
+        )),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 2), g(m, 3), g(m, 1))),
+    );
+    let t = c.sub(
+        &rx(&format!(r"(?<![\w.,])(\d+(?:,\d{{1,2}})?)[ \xa0]?({MONEY_CUR})[-–](\d+(?:,\d{{1,2}})?)[ \xa0]?\2(?!\w)")),
+        &t,
+        |m| Some(format!("{}-{} {}", g(m, 1), g(m, 3), g(m, 2))),
+    );
+    c.sub_tpl(&rx(r"(?<![\w.,~\d])~ ?(?=\d)"), &t, "około ")
+}
+
+fn pl_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({GROUPED}),(\d)(?=[ \xa0]?(?:{MONEY_CUR})(?!\w))")), &t, |m| {
+        Some(format!("{},{}0", g(m, 1), g(m, 2)))
+    });
+    c.sub(
+        &rx(&format!(r"(?<![\w.,])({MONEY_SIGN})({GROUPED}),(\d)(?![\d\w]|,\d|[ \xa0]?(?:tys|mln|mld|bln)(?!\w))")),
+        &t,
+        |m| Some(format!("{}{},{}0", g(m, 1), g(m, 2), g(m, 3))),
+    )
+}
+
+/// 12345678 -> "12 345 678".
+fn group3(n: u128) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// The digits of `s` as a number (`int(re.sub(r"\D", "", s))`).
+fn digits_int(s: &str) -> u128 {
+    py_int(&s.chars().filter(char::is_ascii_digit).collect::<String>())
+}
+
+fn pl_trillion(t: String, c: &mut Ctx) -> String {
+    c.sub(
+        &rx(&format!(
+            r"(?<![\w.,])({MONEY_SIGN} ?)?(\d{{1,3}}(?:[ \xa0]\d{{3}}){{4}}|[1-9]\d{{0,2}}0{{12}})(?![\d]|[ \xa0]\d|[.,]\d{{3}})(,\d{{1,2}}(?!\d))?(?:[ \xa0]?({MONEY_CUR})(?!\w))?"
+        )),
+        &t,
+        |m| {
+            let (sign, num, frac, cur) = (g(m, 1), g(m, 2), g(m, 3), g(m, 4));
+            if !frac.is_empty() && sign.is_empty() && cur.is_empty() {
+                return None;
+            }
+            let n = digits_int(num);
+            let (tr, rest) = (n / 1_000_000_000_000, n % 1_000_000_000_000);
+            if !(1..=999).contains(&tr) {
+                return None;
+            }
+            let tail = if cur.is_empty() { String::new() } else { format!(" {cur}") };
+            let out = if rest == 0 {
+                words(&format!("{sign}{tr} 000 000{frac}{tail}"), "pl")
+            } else {
+                format!("{} {}", words(&format!("{tr} 000 000"), "pl"), words(&format!("{sign}{}{frac}{tail}", group3(rest)), "pl"))
+            };
+            if !out.contains("milion") || search(r"\d", &out) {
+                return None;
+            }
+            let out = out.replacen("milion", "bilion", 1);
+            Some(if out.starts_with("bilion") { format!("jeden {out}") } else { out })
+        },
+    )
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("mies.", "miesięcznie"),
+    ("mies", "miesięcznie"),
+    ("m-c", "miesięcznie"),
+    ("msc", "miesięcznie"),
+    ("mc", "miesięcznie"),
+    ("tydz.", "tygodniowo"),
+    ("tydzień", "tygodniowo"),
+    ("doba", "za dobę"),
+    ("dobę", "za dobę"),
+    ("noc", "za noc"),
+    ("r.", "rocznie"),
+    ("m²", "za metr kwadratowy"),
+    ("m2", "za metr kwadratowy"),
+    ("m³", "za metr sześcienny"),
+    ("m3", "za metr sześcienny"),
+    ("kWh", "za kilowatogodzinę"),
+    ("MWh", "za megawatogodzinę"),
+    ("km", "za kilometr"),
+    ("ha", "za hektar"),
+    ("min", "za minutę"),
+    ("os", "za osobę"),
+    ("szt", "za sztukę"),
+    ("l", "za litr"),
+    ("t", "za tonę"),
+    ("g", "za gram"),
+];
+
+/// `|`-joined escaped keys of `table`, longest first (ties in table order).
+fn alternation(keys: &[&str]) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.iter().map(|k| super::super::re_escape(k)).collect::<Vec<_>>().join("|")
+}
+
+fn pl_per_unit(t: String, c: &mut Ctx) -> String {
+    let dens = alternation(&PER_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>());
+    let t = c.sub(&rx(&format!(r"(?<![\w.,])({MONEY_SIGN})({GROUPED}(?:,\d{{1,2}})?)/(?=\w)")), &t, |m| {
+        Some(format!("{} {}/", g(m, 2), g(m, 1)))
+    });
+    let s: &str = &t;
+    c.sub(&rx(&format!(r"(?<=\d)([ \xa0]?(?:{MONEY_CUR}))()/({dens})(?![\w²³])")), &t, |m| {
+        let den = g(m, 3);
+        let per = lookup(PER_UNIT, den)?;
+        let dot = if den.ends_with('.') { end_dot(s, end(m)) } else { "" };
+        let amount = format!("{}{}", g(m, 1), g(m, 2));
+        Some(format!("{amount} {per}{dot}"))
+    })
+}
+
+/// Currencies the grammar leaves unread: forms after 1, after 2-4, after 5+ (genitive plural), genitive singular,
+/// gender.
+const OTHER_CUR: &[(&str, [&str; 5])] = &[
+    ("HUF", ["forint", "forinty", "forintów", "forinta", "m"]),
+    ("Ft", ["forint", "forinty", "forintów", "forinta", "m"]),
+    ("SEK", ["korona szwedzka", "korony szwedzkie", "koron szwedzkich", "korony szwedzkiej", "f"]),
+    ("NOK", ["korona norweska", "korony norweskie", "koron norweskich", "korony norweskiej", "f"]),
+    ("DKK", ["korona duńska", "korony duńskie", "koron duńskich", "korony duńskiej", "f"]),
+    ("RON", ["lej rumuński", "leje rumuńskie", "lejów rumuńskich", "leja rumuńskiego", "m"]),
+    ("BGN", ["lew bułgarski", "lewy bułgarskie", "lewów bułgarskich", "lewa bułgarskiego", "m"]),
+    ("BYN", ["rubel białoruski", "ruble białoruskie", "rubli białoruskich", "rubla białoruskiego", "m"]),
+    ("CNY", ["juan", "juany", "juanów", "juana", "m"]),
+];
+
+/// 0 after 1, 1 after 2-4 (not 12-14), 2 otherwise (genitive plural).
+fn plural_form(n: u128) -> usize {
+    if n == 1 {
+        0
+    } else if matches!(n % 10, 2..=4) && !matches!(n % 100, 12..=14) {
+        1
+    } else {
+        2
+    }
+}
+
+fn pl_money_words(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(
+            r"(?<![\w.,\-–])(?:\d+[-–](?=\d))?(?:{GROUPED})(?:,\d{{2}})?[ \xa0]?(?:Kč|CZK|₴|UAH|₺|TRY|₽|RUB)(?!\w)"
+        )),
+        &t,
+        |m| {
+            let r = words(&m[0], "pl");
+            let out = sub_plain(&rx(r"\bdwa (?=(?:do \w+ )?(?:koron|hrywn|lir|kopiej)\w*)"), &r, |_| {
+                Some("dwie ".to_string())
+            });
+            let out = sub_plain(&rx(r"\bjeden (?=(?:do \w+ )?(?:koron|hrywn|lir|kopiej)\w*)"), &out, |_| {
+                Some("jedna ".to_string())
+            });
+            if out == r || search(r"\d", &out) { None } else { Some(out) }
+        },
+    );
+    let codes = alternation(&OTHER_CUR.iter().map(|kv| kv.0).collect::<Vec<_>>());
+    let s: &str = &t;
+    let t2 = c.sub(
+        &rx(&format!(r"(?<![\w.,\-–−])(?:(\d+)[-–](?=\d)|([-−]))?({GROUPED})(?:,(\d{{1,2}}))?[ \xa0]?({codes})(?!\w)")),
+        &t,
+        |m| {
+            let (minus, num, code) = (g(m, 2), g(m, 3), g(m, 5));
+            let forms = OTHER_CUR.iter().find(|kv| kv.0 == code)?.1;
+            let n = digits_int(num);
+            let one_word = |gender: &str| (if gender == "f" { "jedna" } else { "jeden" }).to_string();
+            if let Some(a) = m.get(1) {
+                // a range: the first number in the nominative, do and the second in the genitive (pięć do dziesięciu)
+                let na = py_int(a.as_str());
+                if m.get(4).is_some() || na >= n {
+                    return None;
+                }
+                let mut wa = words(a.as_str(), "pl");
+                if na == 1 {
+                    wa = one_word(forms[4]);
+                } else if forms[4] == "f" && wa.split_whitespace().last() == Some("dwa") {
+                    wa = format!("{}dwie", &wa[..wa.len() - 3]);
+                }
+                let wb = card(n, "gen", forms[4])?;
+                let out = format!("{wa} do {wb} {}", if n == 1 { forms[3] } else { forms[2] });
+                return if search(r"\d", &out) { None } else { Some(out) };
+            }
+            if m.get(4).is_none() && minus.is_empty() && GEN_PREPS.contains(&prep_before(s, start(m)).as_str()) {
+                let wb = card(n, "gen", forms[4])?;
+                return Some(format!("{wb} {}", if n == 1 { forms[3] } else { forms[2] }));
+            }
+            let out = if m.get(4).is_some() {
+                format!("{} {}", words(&format!("{n},{}", g(m, 4)), "pl"), forms[3])
+            } else {
+                let mut ws = words(&group3(n), "pl");
+                if n == 1 {
+                    ws = one_word(forms[4]);
+                } else if forms[4] == "f" && ws.split_whitespace().last() == Some("dwa") {
+                    ws = format!("{}dwie", &ws[..ws.len() - 3]);
+                }
+                format!("{ws} {}", forms[plural_form(n)])
+            };
+            if search(r"\d", &out) {
+                return None;
+            }
+            Some(format!("{}{out}", if minus.is_empty() { "" } else { "minus " }))
+        },
+    );
+    let mut gen_words: Vec<&str> = CARD.iter().map(|kv| kv.1.split_whitespace().next().unwrap_or("")).collect();
+    gen_words.extend(["jednego", "jednej"]);
+    gen_words.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()).then(a.cmp(b)));
+    gen_words.dedup();
+    let alt = gen_words.join("|");
+    let s2: &str = &t2;
+    c.sub(&rx(&format!(r"(?<!\w)({alt}) ({codes})(?!\w)")), &t2, |m| {
+        // the preposition before the run of number words must take the genitive (pięciu is also dative, locative)
+        let head = sub_plain(&rx(&format!(r"(?:(?<!\w)(?:{alt}) )+$")), &s2[..start(m)], |_| Some(String::new()));
+        if !GEN_PREPS.contains(&prep_before(&head, head.len()).as_str()) {
+            return None;
+        }
+        let forms = OTHER_CUR.iter().find(|kv| kv.0 == g(m, 2))?.1;
+        let w = g(m, 1);
+        Some(format!("{w} {}", if w == "jednego" || w == "jednej" { forms[3] } else { forms[2] }))
+    })
 }

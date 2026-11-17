@@ -16,8 +16,13 @@ pub(super) const RULES: &[LangRule] = &[
     ("hu.date", hu_date),
     ("hu.time", hu_time),
     ("hu.half", hu_half),
+    ("hu.money-range", hu_money_range),
     ("hu.range", hu_range),
+    ("hu.money-decimal", hu_money_decimal),
+    ("hu.per-unit", hu_per_unit),
+    ("hu.units", hu_units),
     ("hu.two", hu_two),
+    ("hu.decimal-two", hu_decimal_two),
     ("hu.stb", hu_stb),
 ];
 
@@ -151,7 +156,7 @@ const COMPOUND: &str = r"(?:[^\W\d_]{2,}(?:s|ú|ű|i)|féle)";
 
 fn hu_two(t: String, c: &mut Ctx) -> String {
     let pat = [
-        r"(?<![\w.,:/+−–-])(?<!\d",
+        r"(?<![\w.,:/+−–$€£¥-])(?<!\d",
         SP,
         r")([$€£¥]?)([-−]?)",
         NUM,
@@ -319,5 +324,106 @@ fn hu_stb(t: String, c: &mut Ctx) -> String {
         let end = m.get(0).expect("group 0").end();
         let dot = matches_at_start(&[SP, r"*(?:$|\n)|", SP, r"+[A-ZÁÉÍÓÖŐÚÜŰ]"].concat(), &t[end..]);
         Some(format!("satöbbi{}", if dot { "." } else { "" }))
+    })
+}
+
+// ================================================================================ money and units (Nov 16 b)
+
+const MONEY_CUR: &str = r"Ft|HUF|€|EUR|\$|USD|£|GBP|CHF";
+const MONEY_SIGN: &str = r"[€$£]";
+
+fn hu_money_range(t: String, c: &mut Ctx) -> String {
+    let t = c.sub(
+        &rx(&format!(r"(?<=\d){SP}?({MONEY_CUR}){SP}?[-–~]{SP}?(\d+(?:,\d{{1,2}})?){SP}?\1(?![\w])")),
+        &t,
+        |m| Some(format!("-{} {}", g(m, 2), g(m, 1))),
+    );
+    c.sub_tpl(&rx(&format!(r"(?<=\d) ?~ ?(?={MONEY_SIGN}?\d)")), &t, "-")
+}
+
+/// An amount with decimals in the grammar's money style with két for kettő, or None when the grammar has no
+/// hundredths word for the currency.
+fn money_words(sign: &str, num: &str, frac: &str, cur: &str) -> Option<String> {
+    let name = unit_reading(cur)?;
+    let r = words(&format!("1,50 {cur}"), "hu");
+    let head = format!("egy {name} ötven ");
+    let minor = r.strip_prefix(&head)?;
+    let whole = py_int(&num.chars().filter(char::is_ascii_digit).collect::<String>());
+    let cents = py_int(&format!("{frac:0<2}"));
+    let mut out = if whole > 0 { format!("{} {name}", attributive(&words(num, "hu"))) } else { String::new() };
+    if cents > 0 {
+        let cw = format!("{} {minor}", attributive(&words(&cents.to_string(), "hu")));
+        out = if out.is_empty() { cw } else { format!("{out} {cw}") };
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(format!("{}{out}", if sign.is_empty() { "" } else { "mínusz " }))
+}
+
+fn hu_money_decimal(t: String, c: &mut Ctx) -> String {
+    let t =
+        c.sub(&rx(&format!(r"(?<![\w.,:/+−–-])([-−]?){NUM},(\d{{1,2}}){SP}?({MONEY_CUR})(?![\w-])")), &t, |m| {
+            let out = money_words(g(m, 1), g(m, 2), g(m, 3), g(m, 4))?;
+            if out == words(&m[0], "hu") { None } else { Some(out) }
+        });
+    c.sub(&rx(&format!(r"(?<![\w.,:/+−–-])([-−]?)({MONEY_SIGN}){NUM},(\d{{1,2}})(?![\d\w-]|,\d)")), &t, |m| {
+        let out = money_words(g(m, 1), g(m, 3), g(m, 4), g(m, 2))?;
+        if out == words(&m[0], "hu") { None } else { Some(out) }
+    })
+}
+
+/// A slash after an amount: the denominators the grammar leaves unread.
+const PER_UNIT: &[(&str, &str)] = &[
+    ("éjszaka", "per éjszaka"),
+    ("éj", "per éjszaka"),
+    ("hét", "per hét"),
+    ("kWh", "per kilowattóra"),
+    ("km", "per kilométer"),
+    ("ha", "per hektár"),
+    ("l", "per liter"),
+    ("t", "per tonna"),
+];
+
+/// `|`-joined keys, longest first (ties in table order); `escape` runs `re.escape` on each.
+fn alternation(keys: &[&str], escape: bool) -> String {
+    let mut ks: Vec<&str> = keys.to_vec();
+    ks.sort_by_key(|k| std::cmp::Reverse(k.chars().count()));
+    ks.iter().map(|k| if escape { super::super::re_escape(k) } else { k.to_string() }).collect::<Vec<_>>().join("|")
+}
+
+fn hu_per_unit(t: String, c: &mut Ctx) -> String {
+    let dens = alternation(&PER_UNIT.iter().map(|kv| kv.0).collect::<Vec<_>>(), true);
+    c.sub(&rx(&format!(r"(?<=\d)({SP}?(?:{MONEY_CUR}))/({dens})(?![\w²])")), &t, |m| {
+        let plain = words(&format!("5 {}/{}", g(m, 1).trim_matches([' ', '\t', '\u{a0}']), g(m, 2)), "hu");
+        if !plain.contains('/') {
+            return None;
+        }
+        Some(format!("{} {}", g(m, 1), PER_UNIT.iter().find(|kv| kv.0 == g(m, 2))?.1))
+    })
+}
+
+/// Units and currencies the grammar leaves as typed after a number.
+const UNIT_WORDS: &[(&str, &str)] = &[
+    ("t", "tonna"),
+    ("ha", "hektár"),
+    ("RON", "román lej"),
+    ("RSD", "szerb dinár"),
+    ("HRK", "horvát kuna"),
+    ("BGN", "bolgár leva"),
+];
+
+fn hu_units(t: String, c: &mut Ctx) -> String {
+    let keys = alternation(&UNIT_WORDS.iter().map(|kv| kv.0).collect::<Vec<_>>(), false);
+    c.sub(&rx(&format!(r"(?<=\d)({SP}?)({keys})(?![\w/²-])")), &t, |m| {
+        Some(format!(" {}", UNIT_WORDS.iter().find(|kv| kv.0 == g(m, 2))?.1))
+    })
+}
+
+fn hu_decimal_two(t: String, c: &mut Ctx) -> String {
+    c.sub(&rx(&format!(r"(?<![\w.,:/+−–-])[-−]?{NUM},\d+(?![\d]|[.,:/]\d)(?:{SP}?{TOKEN}(?![\w]))?")), &t, |m| {
+        let r = words(&m[0], "hu");
+        let new = fix_inner(&r);
+        if new == r { None } else { Some(new) }
     })
 }

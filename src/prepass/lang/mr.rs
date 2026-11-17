@@ -4,21 +4,30 @@
 #[allow(unused_imports)]
 use super::super::{Ctx, g, py_int, rx, tpl};
 use super::hi::{
-    ACRONYMS, DEVA, SANSKRIT_ORD, alt, ampm, clock_hourword, glued, half_scale, halves, has_digit, latin_number,
-    quarters, ranges, regnal, score, years,
+    ACRONYMS, DEVA, SANSKRIT_ORD, alt, ampm, big, clock_hourword, codes, glued, half_scale, halves, has_digit,
+    latin_number, money_minus, money_range, per_unit, quarters, ranges, regnal, score, space_groups, unit_groups,
+    years,
 };
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("mr.space-groups", mr_space_groups),
+    ("mr.big", mr_big),
     ("mr.glued", mr_glued),
     ("mr.year", mr_year),
     ("mr.ampm", mr_ampm),
     ("mr.clock-hourword", mr_clock),
+    ("mr.money-range", mr_money_range),
+    ("mr.minus", mr_minus),
     ("mr.latin-number", mr_latin_number),
     ("mr.score", mr_score),
     ("mr.range", mr_range),
+    ("mr.per", mr_per),
+    ("mr.codes", mr_codes),
     ("mr.half-scale", mr_half_scale),
+    ("mr.unit-groups", mr_unit_groups),
+    ("mr.units", mr_units),
     ("mr.ordinal-oblique", mr_ordinal_oblique),
     ("mr.title-shri", mr_title_shri),
     ("mr.regnal", mr_regnal),
@@ -46,6 +55,24 @@ const MONTHS: &[&str] = &[
     "नोव्हें",
     "डिसें",
 ];
+
+const MR_SCALES: &[&str] = &["लाख", "कोटी", "हजार", "अब्ज", "खर्व"];
+
+fn mr_space_groups(t: String, c: &mut Ctx) -> String {
+    space_groups(t, c)
+}
+
+fn mr_big(t: String, c: &mut Ctx) -> String {
+    big(t, c, "mr", "उणे")
+}
+
+fn mr_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, "mr", "ते", DEVA, MR_SCALES)
+}
+
+fn mr_minus(t: String, c: &mut Ctx) -> String {
+    money_minus(t, c, "उणे", DEVA)
+}
 
 fn mr_glued(t: String, c: &mut Ctx) -> String {
     glued(
@@ -113,7 +140,16 @@ fn mr_range(t: String, c: &mut Ctx) -> String {
         DEVA,
         "ते",
         &["ने", "ला", "ते", "चा", "ची", "चे", "च्या", "मध्ये", "पर्यंत", "पासून", "आहे", "आहेत", "होते", "होता", "आणि", "किंवा"],
+        "[-–~～〜]",
     )
+}
+
+fn mr_codes(t: String, c: &mut Ctx) -> String {
+    codes(t, c, "mr", DEVA, &[("Tk.", "टका", "पैसे"), ("Tk", "टका", "पैसे")], MR_SCALES)
+}
+
+fn mr_per(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, "mr", "प्रति", DEVA, &["रुपये", "रुपया"])
 }
 
 fn mr_half_scale(t: String, c: &mut Ctx) -> String {
@@ -127,6 +163,14 @@ fn mr_half_scale(t: String, c: &mut Ctx) -> String {
         &|n| halves(n, "mr", "दीड", "अडीच", "साडे", ""),
         false,
     )
+}
+
+fn mr_unit_groups(t: String, c: &mut Ctx) -> String {
+    unit_groups(t, c, "mr")
+}
+
+fn mr_units(t: String, c: &mut Ctx) -> String {
+    c.sub_tpl(&rx(r"(?<=\d)( ?)L(?![A-Za-z0-9²³/])"), &t, r"\1l")
 }
 
 const OBLIQUE: &[(&str, &str)] = &[("व्या", "वा"), ("ल्या", "ला"), ("ऱ्या", "रा"), ("थ्या", "था")];

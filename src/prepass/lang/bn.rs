@@ -4,13 +4,14 @@
 #[allow(unused_imports)]
 use super::super::{Ctx, g, py_int, rx, tpl};
 use super::hi::{
-    ACRONYMS, BENG, alt, ampm, glued, half_scale, halves, has_digit, is_year, latin_number, minus, score, year_words,
-    years,
+    ACRONYMS, BENG, alt, ampm, big, codes, glued, half_scale, halves, has_digit, is_year, latin_number, minus,
+    money_minus, money_range, per_unit, ranges, score, space_groups, year_words, years,
 };
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("bn.space-groups", bn_space_groups),
     ("bn.decade", bn_decade),
     ("bn.glued", bn_glued),
     ("bn.year", bn_year),
@@ -21,6 +22,11 @@ pub(super) const RULES: &[LangRule] = &[
     ("bn.minus", bn_minus),
     ("bn.latin-number", bn_latin_number),
     ("bn.taka", bn_taka),
+    ("bn.big", bn_big),
+    ("bn.money-range", bn_money_range),
+    ("bn.range", bn_range),
+    ("bn.per", bn_per),
+    ("bn.codes", bn_codes),
     ("bn.half-scale", bn_half_scale),
     ("bn.kg", bn_kg),
 ];
@@ -49,6 +55,12 @@ const MONTHS: &[&str] = &[
     "নভে",
     "ডিসে",
 ];
+
+const BN_SCALES: &[&str] = &["লাখ", "লক্ষ", "কোটি", "হাজার", "আরব", "খরব"];
+
+fn bn_space_groups(t: String, c: &mut Ctx) -> String {
+    space_groups(t, c)
+}
 
 fn bn_decade(t: String, c: &mut Ctx) -> String {
     c.sub(
@@ -130,6 +142,7 @@ fn bn_classifier_case(t: String, c: &mut Ctx) -> String {
 }
 
 fn bn_minus(t: String, c: &mut Ctx) -> String {
+    let t = money_minus(t, c, "মাইনাস", BENG);
     minus(
         t,
         c,
@@ -147,6 +160,41 @@ fn bn_latin_number(t: String, c: &mut Ctx) -> String {
 
 fn bn_taka(t: String, c: &mut Ctx) -> String {
     c.sub(&rx(r"(?<![A-Za-z])(?:₹|Rs\.?)(?=\s?\d)"), &t, |_| Some("৳".to_string()))
+}
+
+fn bn_big(t: String, c: &mut Ctx) -> String {
+    big(t, c, "bn", "মাইনাস")
+}
+
+fn bn_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, "bn", "থেকে", BENG, BN_SCALES)
+}
+
+fn bn_range(t: String, c: &mut Ctx) -> String {
+    ranges(
+        t,
+        c,
+        BENG,
+        "থেকে",
+        &["থেকে", "পর্যন্ত", "এর", "কে", "তে", "এ", "ও", "এবং", "বা", "গোলে", "ছিল", "হয়"],
+        "[~～〜]",
+    )
+}
+
+const BN_CODES: &[(&str, &str, &str)] = &[
+    ("NPR", "নেপালি রুপি", "পয়সা"),
+    ("LKR", "শ্রীলঙ্কান রুপি", "সেন্ট"),
+    ("HKD", "হংকং ডলার", "সেন্ট"),
+    ("SGD", "সিঙ্গাপুর ডলার", "সেন্ট"),
+    ("MYR", "মালয়েশিয়ান রিংগিত", "সেন"),
+];
+
+fn bn_codes(t: String, c: &mut Ctx) -> String {
+    codes(t, c, "bn", BENG, BN_CODES, BN_SCALES)
+}
+
+fn bn_per(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, "bn", "প্রতি", BENG, &["টাকা"])
 }
 
 fn bn_half_scale(t: String, c: &mut Ctx) -> String {

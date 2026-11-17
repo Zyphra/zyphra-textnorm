@@ -4,19 +4,25 @@
 #[allow(unused_imports)]
 use super::super::{Ctx, g, py_int, rx, tpl};
 use super::hi::{
-    ACRONYMS, ARAB, absorb_postposition, alt, clock_hourword, glued, half_scale, halves, is_year, latin_number, ranges,
-    regnal, score, year_words, years,
+    ACRONYMS, ARAB, absorb_postposition, alt, big, clock_hourword, codes, glued, half_scale, halves, is_year,
+    latin_number, money_minus, money_range, per_unit, ranges, regnal, score, space_groups, year_words, years,
 };
 #[allow(unused_imports)]
 use super::{LangRule, digit_words, words};
 
 pub(super) const RULES: &[LangRule] = &[
+    ("ur.space-groups", ur_space_groups),
+    ("ur.big", ur_big),
     ("ur.glued", ur_glued),
     ("ur.year", ur_year),
     ("ur.clock-hourword", ur_clock),
     ("ur.latin-number", ur_latin_number),
     ("ur.score", ur_score),
+    ("ur.money-range", ur_money_range),
+    ("ur.minus", ur_minus),
     ("ur.range", ur_range),
+    ("ur.per", ur_per),
+    ("ur.codes", ur_codes),
     ("ur.money-scale", ur_money_scale),
     ("ur.page", ur_page),
     ("ur.regnal", ur_regnal),
@@ -25,6 +31,40 @@ pub(super) const RULES: &[LangRule] = &[
 const MONTHS: &[&str] =
     &["جنوری", "فروری", "مارچ", "اپریل", "مئی", "جون", "جولائی", "اگست", "ستمبر", "اکتوبر", "نومبر", "دسمبر"];
 const ERA: &[(&str, &str)] = &[("ء", "عیسوی"), ("ھ", "ہجری")];
+
+const UR_SCALES: &[&str] = &["ہزار", "لاکھ", "کروڑ", "ارب", "کھرب"];
+
+fn ur_space_groups(t: String, c: &mut Ctx) -> String {
+    space_groups(t, c)
+}
+
+fn ur_big(t: String, c: &mut Ctx) -> String {
+    big(t, c, "ur", "منفی")
+}
+
+fn ur_money_range(t: String, c: &mut Ctx) -> String {
+    money_range(t, c, "ur", "سے", ARAB, UR_SCALES)
+}
+
+fn ur_minus(t: String, c: &mut Ctx) -> String {
+    money_minus(t, c, "منفی", ARAB)
+}
+
+const UR_CODES: &[(&str, &str, &str)] = &[
+    ("NPR", "نیپالی روپے", "پیسے"),
+    ("LKR", "سری لنکن روپے", "سینٹ"),
+    ("MYR", "ملائیشین رنگٹ", "سین"),
+    ("Tk.", "ٹکا", "پیسے"),
+    ("Tk", "ٹکا", "پیسے"),
+];
+
+fn ur_codes(t: String, c: &mut Ctx) -> String {
+    codes(t, c, "ur", ARAB, UR_CODES, UR_SCALES)
+}
+
+fn ur_per(t: String, c: &mut Ctx) -> String {
+    per_unit(t, c, "ur", "فی", ARAB, &["روپے", "روپیہ", "روپئے"])
+}
 
 fn ur_glued(t: String, c: &mut Ctx) -> String {
     glued(t, c, "ur", ARAB, &["میں", "کا", "کی", "کے", "کو", "سے", "تک", "پر", "نے"], false)
@@ -70,6 +110,7 @@ fn ur_range(t: String, c: &mut Ctx) -> String {
         ARAB,
         "سے",
         &["سے", "تک", "کو", "کا", "کی", "کے", "میں", "پر", "نے", "ہے", "ہیں", "تھا", "تھی", "تھے", "اور", "یا"],
+        "[-–~～〜]",
     )
 }
 
